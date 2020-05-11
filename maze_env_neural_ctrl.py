@@ -46,7 +46,7 @@ with model:
             normalize_sensor_output=True
         ),
         size_in=4,
-        size_out=n_sensors + 3,
+        size_out=n_sensors + 4,
     )
 
     linear_velocity = nengo.Ensemble(n_neurons=n_neurons, dimensions=1)
@@ -58,11 +58,11 @@ with model:
     nengo.Connection(angular_velocity[1], environment[2], synapse=tau_sensory) 
 
     ang_control_func = partial(sense_to_ang_vel, n_sensors = n_sensors)
-    nengo.Connection(environment[3:], angular_velocity, function=ang_control_func,
+    nengo.Connection(environment[3:n_sensors+3], angular_velocity, function=ang_control_func,
                      transform=[[1.], [1.]], synapse=tau_sensory)
 
     lin_control_func = partial(sense_to_lin_vel, n_sensors = n_sensors)
-    nengo.Connection(environment[3:], linear_velocity, function=lin_control_func,
+    nengo.Connection(environment[3:n_sensors+3], linear_velocity, function=lin_control_func,
                      synapse=tau_sensory)
     
     ang_exc_const = nengo.Node([0.1])

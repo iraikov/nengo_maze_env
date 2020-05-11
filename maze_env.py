@@ -119,7 +119,7 @@ class NengoMazeEnvironment(object):
 
         # Set up svg element templates to be filled in later
         self.tile_template =  '<rect x={0} y={1} width=1 height=1 style="fill:black;"/>' 
-        self.texture_template =  '<rect x={0} y={1} width=1 height=1 style="fill:black;"/>' 
+        self.texture_template =  '<rect x={0} y={1} width=1 height=1 style="fill:black;fill-opacity:{2};"/>' 
         self.agent_template = '<polygon points="0.25,0.25 -0.25,0.25 0,-0.5" style="fill:blue" transform="translate({0},{1}) rotate({2})"/>'
         self.sensor_template = '<line x1="{0}" y1="{1}" x2="{2}" y2="{3}" style="stroke:rgb(128,128,128);stroke-width:.1"/>'
         self.svg_header = '<svg width="100%%" height="100%%" viewbox="0 0 {0} {1}">'.format(self.height, self.width)
@@ -168,7 +168,8 @@ class NengoMazeEnvironment(object):
                 # This will have to change when tiles can have different colours
                 if self.maze[i, j] == 1:
                     tiles.append(self.tile_template.format(i, j))
-                    #tiles.append(self.tile_template.format(i, j, self.texture))
+                else:
+                    tiles.append(self.texture_template.format(i, j, self.texture_map[i,j]))
 
         # draw agent
         direction = self.th * 180. / np.pi + 90. #TODO: make sure angle conversion is correct
