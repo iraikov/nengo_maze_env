@@ -12,7 +12,7 @@ class LoadFrom(nengo.solvers.Solver):
             shape = (A.shape[1], E.shape[1])
         else:
             shape = (A.shape[1], Y.shape[1])
-            
+
         try:
             value = np.load(self.filename)
             assert value.shape == shape

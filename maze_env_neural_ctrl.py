@@ -10,6 +10,7 @@ from nengo_maze_env.maze_env import NengoMazeEnvironment
 dt = 0.005
 tau_sensory = 0.004
 n_sensors = 8
+n_t_sensors = 9
 n_neurons = 50
 
 def sense_to_ang_vel(x, n_sensors):
@@ -46,7 +47,7 @@ with model:
             normalize_sensor_output=True
         ),
         size_in=4,
-        size_out=n_sensors + 4,
+        size_out=n_sensors + n_t_sensors + 3,
     )
 
     linear_velocity = nengo.Ensemble(n_neurons=n_neurons, dimensions=1)

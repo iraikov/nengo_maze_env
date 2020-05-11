@@ -81,7 +81,7 @@ class NengoReservoir(Network):
             self.output = zC
             self.error = eC
             self.ensemble = xC
-            self.weight_saver = WeightSaver(connC, 'weights_path')
+            self.weight_saver = WeightSaver(connC, weights_path)
             
     @property
     def rsvr_ens_config(self):

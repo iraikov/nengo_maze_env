@@ -90,6 +90,9 @@ class NengoMazeEnvironment(object):
 
         self.max_sensor_dist = max_sensor_dist
 
+        # Number of texture sensors
+        self.n_texture_sensors = 4
+
         # If true, divide distances by max_sensor_dist
         self.normalize_sensor_output = normalize_sensor_output
 
@@ -115,7 +118,7 @@ class NengoMazeEnvironment(object):
         # Create the default starting texture
         self.kappa = kappa
         self._generate_texture_map()
-        self.texture = 0.
+        self.texture = [0.]*9
 
         # Set up svg element templates to be filled in later
         self.tile_template =  '<rect x={0} y={1} width=1 height=1 style="fill:black;"/>' 
@@ -264,7 +267,15 @@ class NengoMazeEnvironment(object):
             self.sensor_dists /= self.max_sensor_dist
 
         # texture readout
-        self.texture = self.texture_map[int(self.x), int(self.y)]
-        
+        self.texture = []
+        ix = int(self.x)
+        iy = int(self.y)
+        ixx, iyy = np.meshgrid(range(ix-1, ix+2), range(iy-1, iy+2), indexing='ij')
+        for x, y in zip(ixx.flat, iyy.flat):
+            if (x >= 1) and (x < self.width) and (y >= 1) and (y < self.height):
+                self.texture.append(self.texture_map[x, y])
+            else:
+                self.texture.append(0.)
+                
         #return self.sensor_dists
-        return np.concatenate([[self.x], [self.y], [self.th], self.sensor_dists, [self.texture]])
+        return np.concatenate([[self.x], [self.y], [self.th], self.sensor_dists, self.texture])

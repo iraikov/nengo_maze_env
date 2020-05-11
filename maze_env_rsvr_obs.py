@@ -7,34 +7,32 @@ from nengo.utils.least_squares_solvers import LSMRScipy
 import nengolib
 from nengolib import RLS, Network
 from reservoir_net import NengoReservoir
-from ws import WeightSaver
-import atexit
+from ws import LoadFrom, WeightSaver
+
 
 # need to install mazelab to use this maze generator
 # https://github.com/zuoxingdong/mazelab
 
 
 seed = 21
-dt = 0.1
-
-# distance sensor integration
-tau_distance = 0.5
+dt = 0.005
 
 # parameters related to sensing and angular/linear velocity control
-n_sensors = 9
+n_sensors = 8
+n_t_sensors = 9
 tau_sensory = 0.005
 ang_exc = 0.1
-n_motor = 150
+n_motor = 50
 
 # sensory binding network
 n_sensory = 100
-ndim_sensory = n_sensors + 2
+ndim_sensory = n_sensors + n_t_sensors + 1
 n_sensory_conv = 300
 sensory_time_delay = 0.5 # s
 
 # parameters for place learning module
 n_place_rsvr = 100
-learning_rate_place = 1e-6
+learning_rate_place = 1e-4
 tau_place_probe = 0.05
 tau_place = 0.05
 T_train = 5.0
@@ -54,13 +52,13 @@ def sense_to_ang_vel(x, n_sensors, k=1.):
     res = k * np.dot(rotation_weights, np.array(x))
     return res
 
-def sense_to_lin_vel(x, n_sensors, v=0.5, b=2.):
+def sense_to_lin_vel(x, n_sensors, v=0.5):
     max_dist = np.max(x)
     res = 0.
     if max_dist > 0.:
         res = v * max_dist
     else:
-        res = -v * b
+        res = -v
     return res
 
 
@@ -79,12 +77,11 @@ with model:
             normalize_sensor_output=True
         ),
         size_in=4,
-        size_out=n_sensors + 4,
+        size_out=n_sensors + n_t_sensors + 3,
     )
 
     linear_velocity = nengo.Ensemble(n_neurons=n_motor, dimensions=1)
 
-    angular_position = nengo.Ensemble(n_neurons=n_sensory, dimensions=1, radius=2*np.pi)
     angular_velocity = nengo.Ensemble(n_neurons=n_motor, dimensions=2)
 
     nengo.Connection(map_selector, environment[3]) # dimension 4
@@ -93,7 +90,7 @@ with model:
     nengo.Connection(angular_velocity[1], environment[2], synapse=tau_sensory) 
 
     ang_control_func = partial(sense_to_ang_vel, n_sensors = n_sensors)
-    nengo.Connection(environment[3:3+n_sensors], angular_velocity,
+    nengo.Connection(environment[3:n_sensors+3], angular_velocity,
                      function=ang_control_func,
                      transform=[[1.], [1.]], synapse=tau_sensory)
 
@@ -103,21 +100,17 @@ with model:
     nengo.Connection(ang_exc, angular_velocity, transform=[[1.], [1.]])
 
     lin_control_func = partial(sense_to_lin_vel, n_sensors = n_sensors)
-    nengo.Connection(environment[3:], linear_velocity,
+    nengo.Connection(environment[3:n_sensors+3], linear_velocity,
                      function=lin_control_func, synapse=tau_sensory)
 
-    lin_exc = nengo.Ensemble(n_neurons=n_motor, dimensions=1)
-    nengo.Connection(lin_exc, environment[0])
-    
     # Circular convolution of current sensory information and sensory
     # information from the recent past
 
-    node_sensory = nengo.Node(size_in=ndim_sensory, output=lambda t,v: 2.0*v)
+    node_sensory = nengo.Node(size_in=ndim_sensory, output=lambda t,v: v)
 
     ens_sensory_cur = nengo.Ensemble(n_neurons=n_sensory, dimensions=ndim_sensory, radius=2.0)
     ens_sensory_del = nengo.Ensemble(n_neurons=n_sensory, dimensions=ndim_sensory, radius=2.0)
 
-    nengo.Connection(angular_position, node_sensory[0], synapse=None)
     nengo.Connection(environment[3:], node_sensory[1:], synapse=None)
 
     sensory_delay = Delay(ndim_sensory, timesteps=int(sensory_time_delay / dt))
@@ -155,7 +148,7 @@ with model:
                                         learning_rule_type=RLS(learning_rate=learning_rate_place,
                                                                pre_synapse=tau_place))
                                                                
-    place_reader_ws = WeightSaver(place_reader_conn, 'maze_env_rsvr_obs_place_reader_weights')
+    place_reader_ws = WeightSaver(place_reader_conn, 'maze_env_rsvr_place_reader_weights')
     
     # Error = actual - target = post - pre
     nengo.Connection(place_reader, place_error[1:])
@@ -170,8 +163,8 @@ with model:
     xy_error = nengo.Node(size_in=3, size_out=2,
                           output=lambda t, e: e[1:] if e[0] else 0.)
 
-    xy_reader_conn = nengo.Connection(place_reader, xy_reader, synapse=None,
-                                      transform=[[1.0] * ndim_sensory, [1.0] * ndim_sensory],
+    xy_reader_conn = nengo.Connection(rsvr_place.ensemble.neurons, xy_reader, synapse=None,
+                                      transform=np.zeros((2, n_place_rsvr*ndim_sensory)),
                                       learning_rule_type=RLS(learning_rate=learning_rate_place,
                                                              pre_synapse=tau_place))
     xy_reader_ws = WeightSaver(xy_reader_conn, 'maze_env_rsvr_obs_xy_reader_weights')
@@ -186,17 +179,20 @@ with model:
 def on_sim_exit(sim): 
     # this will get triggered when the simulation is over
     rsvr_place.weight_saver.save(sim)
-    place_reader_weight_saver.save(sim)    
-    xy_reader_weight_saver.save(sim)    
+    place_reader_ws.save(sim)    
+    xy_reader_ws.save(sim)    
 
 
-from nengo_extras.gexf import CollapsingGexfConverter
-
-CollapsingGexfConverter().convert(model).write('maze_env_rsvr_obs.gexf')
+#from nengo_extras.gexf import CollapsingGexfConverter
+#CollapsingGexfConverter().convert(model).write('maze_env_rsvr_obs.gexf')
 
 if __name__ == '__main__':
-    import nengo_gui
-    nengo_gui.GUI(__file__).start()
+    runtime = 3.0
+    with nengo.Simulator(model, progress_bar=True, dt=dt) as sim:
+        sim.run(runtime)
+    on_sim_exit(sim)
+
+
 
 
     
