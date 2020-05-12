@@ -1,6 +1,6 @@
 import numpy as np
 import nengo
-from nengolib import RLS, Network
+from nengolib import RLS
 from ws import WeightSaver
 
 # xC are the neurons
@@ -9,7 +9,7 @@ from ws import WeightSaver
 # eC is a gated error signal for RLS that turns off after T_train seconds. This error signal learns the feedback decoders by minmizing the difference between z (ideal output) and zC (actual output).
 # The error signal driving RLS has an additional filter applied (tau_learn) to handle the case when this signal consists of spikes (not rates).
 
-class NengoReservoir(Network):
+class NengoReservoir(nengo.Network):
     def __init__(self, n_per_dim=1000,
                  n_eval_points = 5000,
                  dimensions = 1,

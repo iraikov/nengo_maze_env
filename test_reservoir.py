@@ -9,7 +9,7 @@ import numpy as np
 import nengo
 from nengo.utils.least_squares_solvers import LSMRScipy
 import nengolib
-from nengolib import RLS, Network
+from nengolib import RLS
 from reservoir_net import NengoReservoir
 
 
@@ -40,7 +40,7 @@ T_total = (trials_train + trials_test) * pulse_interval
 # In[3]:
 
 
-with Network(seed=seed) as model:
+with nengo.Network(seed=seed) as model:
     # Input is a random sample every pulse_interval seconds
     rng = np.random.RandomState(seed=seed)
     U = nengo.dists.UniformHypersphere(surface=False).sample(trials_train+trials_test, ndim, rng=rng)

@@ -27,6 +27,7 @@ n_motor = 50
 # sensory binding network
 n_sensory = 50
 ndim_sensory = n_sensors + n_t_sensors + 1
+n_sensory_conv = 30
 sensory_time_delay = 0.5 # s
 
 # parameters for place learning module
@@ -102,6 +103,8 @@ with model:
     nengo.Connection(environment[3:n_sensors+3], linear_velocity,
                      function=lin_control_func, synapse=tau_sensory)
 
+    # Circular convolution of current sensory information and sensory
+    # information from the recent past
 
     node_sensory = nengo.Node(size_in=ndim_sensory, output=lambda t,v: v)
 
@@ -117,6 +120,13 @@ with model:
     nengo.Connection(node_sensory, node_sensory_delay, synapse=None)
     nengo.Connection(node_sensory_delay, ens_sensory_del, synapse=tau_sensory)
 
+    ens_sensory_bound = nengo.Ensemble(n_neurons=n_sensory_conv, dimensions=ndim_sensory)
+    
+    bind_sensory = nengo.networks.CircularConvolution(n_neurons=n_sensory_conv,
+                                                      dimensions=ndim_sensory)
+    nengo.Connection(ens_sensory_del, bind_sensory.A)
+    nengo.Connection(ens_sensory_cur, bind_sensory.B)
+    nengo.Connection(bind_sensory.output, ens_sensory_bound) 
 
     # Place learning
     
@@ -126,7 +136,7 @@ with model:
                                learning_rate=learning_rate_place, tau=tau_place,
                                weights_path='maze_env_rsvr_place_rsvr_weights'  )
     
-    nengo.Connection(ens_sensory_del, rsvr_place.input, synapse=None)
+    nengo.Connection(ens_sensory_bound, rsvr_place.input, synapse=None)
     nengo.Connection(place_learning, rsvr_place.enable_learning, synapse=None)
 
     place_reader = nengo.Ensemble(n_place_rsvr*ndim_sensory, dimensions=ndim_sensory)
