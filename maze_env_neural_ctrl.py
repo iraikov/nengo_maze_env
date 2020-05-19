@@ -7,9 +7,9 @@ from nengo_maze_env.maze_env import NengoMazeEnvironment
 # need to install mazelab to use this maze generator
 # https://github.com/zuoxingdong/mazelab
 
-dt = 0.005
+dt = 0.001
 tau_sensory = 0.004
-n_sensors = 8
+n_sensors = 9
 n_t_sensors = 9
 n_neurons = 50
 
@@ -47,7 +47,7 @@ with model:
             normalize_sensor_output=True
         ),
         size_in=4,
-        size_out=n_sensors + n_t_sensors + 3,
+        size_out=n_sensors + n_t_sensors + 4,
     )
 
     linear_velocity = nengo.Ensemble(n_neurons=n_neurons, dimensions=1)
@@ -72,4 +72,31 @@ with model:
     nengo.Connection(ang_exc, angular_velocity, transform=[[1.], [1.]])
 
     
+    
+
+if __name__ == '__main__':
+    runtime = 5.0
+    
+    with model:
+        tau_probe = 0.05
+        p_xy = nengo.Probe(environment, synapse=tau_probe)
+
+
+    with nengo.Simulator(model, progress_bar=True, dt=dt) as sim:
+        sim.run(runtime)
+        
+        plt.figure(figsize=(16, 6))
+        plt.title("X-Y Position")
+        plt.plot(sim.trange(), sim.data[p_xy],
+                 alpha=0.8, label="Vel error")
+        plt.xlabel("Time (s)")
+        plt.ylabel("Position")
+        plt.legend()
+        plt.show()
+
+    
+
+
+
+
     

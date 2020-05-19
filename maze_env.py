@@ -295,7 +295,6 @@ class NengoMazeEnvironment(object):
 
         self.reward[0] = self.reward_map.get((ix, iy), 0.0)
 
-        print(self.sensor_dists)
         #return self.sensor_dists
         return np.concatenate([[self.x], [self.y], [self.th / (2*np.pi)],
                               self.sensor_dists, self.texture, self.reward])
