@@ -120,9 +120,13 @@ class NengoMazeEnvironment(object):
         self._generate_texture_map()
         self.texture = [0.]*9
 
+        # Create the default reward map
+        self._generate_reward_map()
+
         # Set up svg element templates to be filled in later
         self.tile_template =  '<rect x={0} y={1} width=1 height=1 style="fill:black;"/>' 
         self.texture_template =  '<rect x={0} y={1} width=1 height=1 style="fill:black;fill-opacity:{2};"/>' 
+        self.reward_template =  '<rect x={0} y={1} width=1 height=1 style="fill:red;fill-opacity:{2};"/>' 
         self.agent_template = '<polygon points="0.25,0.25 -0.25,0.25 0,-0.5" style="fill:blue" transform="translate({0},{1}) rotate({2})"/>'
         self.sensor_template = '<line x1="{0}" y1="{1}" x2="{2}" y2="{3}" style="stroke:rgb(128,128,128);stroke-width:.1"/>'
         self.svg_header = '<svg width="100%%" height="100%%" viewbox="0 0 {0} {1}">'.format(self.height, self.width)
@@ -147,15 +151,24 @@ class NengoMazeEnvironment(object):
         """
         Generate a new texture map based on the current seed
         """
-        np.random.seed(self.current_seed)
-        maze = random_shape_maze(width=self.width, height=self.height,
-                                 max_shapes=50, max_size=8, allow_overlap=False, shape=None,
-                                 seed=self.current_seed)
+        np.random.seed(self.current_seed+1)
         
         texture_map = binary_blobs(length=max(self.width, self.height),n_dim=2)
 
         result = anisodiff(texture_map, niter=10, kappa=self.kappa)
         self.texture_map = result
+
+    def _generate_reward_map(self):
+        """
+        Generate a new reward map based on the current seed
+        """
+        np.random.seed(self.current_seed+2)
+
+        x = 8
+        y = 8
+
+        self.reward = np.zeros((1,))
+        self.reward_map = {(x, y): 1.0}
 
 
         
@@ -173,7 +186,9 @@ class NengoMazeEnvironment(object):
                     tiles.append(self.tile_template.format(i, j))
                 else:
                     tiles.append(self.texture_template.format(i, j, self.texture_map[i,j]))
-
+                if (i,j) in self.reward_map:
+                    tiles.append(self.reward_template.format(i, j, self.reward_map[(i,j)]))
+                
         # draw agent
         direction = self.th * 180. / np.pi + 90. #TODO: make sure angle conversion is correct
         x = self.x
@@ -243,7 +258,7 @@ class NengoMazeEnvironment(object):
             dy = self.y - y
             self.x = x
             self.y = y
-            
+
         # Keep the agent within the bounds of the maze
         self.x = np.clip(self.x, 1, self.width - 1)
         self.y = np.clip(self.y, 1, self.height - 1)
@@ -257,7 +272,8 @@ class NengoMazeEnvironment(object):
         if seed != self.current_seed:
             self.current_seed = seed
             self._generate_map()
-            self._generate_texture()
+            self._generate_texture_map()
+            self._generate_reward_map()
 
         # Generate SVG image for nengo_gui
         # sensor_dists is also calculated in this function
@@ -276,6 +292,10 @@ class NengoMazeEnvironment(object):
                 self.texture.append(self.texture_map[x, y])
             else:
                 self.texture.append(0.)
-                
+
+        self.reward[0] = self.reward_map.get((ix, iy), 0.0)
+
+        print(self.sensor_dists)
         #return self.sensor_dists
-        return np.concatenate([[self.x], [self.y], [self.th], self.sensor_dists, self.texture])
+        return np.concatenate([[self.x], [self.y], [self.th / (2*np.pi)],
+                              self.sensor_dists, self.texture, self.reward])
