@@ -25,7 +25,7 @@ dt = 0.002
 trials_train = 3
 trials_test = 4
 
-ndim = 20
+ndim = 3
 n = 100
 learning_rate = 1e-6
 seed = 21
@@ -49,10 +49,13 @@ with nengo.Network(seed=seed) as model:
 
     z = nengo.Node(size_in=ndim)
     nengo.Connection(u, z, synapse=nengo.synapses.Lowpass(tau))
+
+    
     learning = nengo.Node(size_in=1, output=lambda t,v: True if t < T_train else False)
 
     rsvr = NengoReservoir(n_per_dim = n, dimensions=ndim, learning_rate=learning_rate, tau=tau)
     nengo.Connection(u, rsvr.input, synapse=None)
+    nengo.Connection(z, rsvr.train, synapse=None)
     nengo.Connection(learning, rsvr.enable_learning, synapse=None)
 
     reader = nengo.Ensemble(n*ndim, dimensions=ndim)
@@ -81,6 +84,7 @@ with model:
     # Probes
     p_u = nengo.Probe(u, synapse=tau_probe)
     p_z = nengo.Probe(z, synapse=tau_probe)
+    p_reader_spikes = nengo.Probe(reader.neurons, attr='spikes', synapse=tau_probe)
     p_error = nengo.Probe(error, synapse=tau_probe)
     p_output = nengo.Probe(reader, synapse=tau_probe)
 

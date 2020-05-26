@@ -52,7 +52,6 @@ class NengoReservoir(nengo.Network):
         with self, self.rsvr_ens_config:
             u = nengo.Node(size_in=dimensions)
             z = nengo.Node(size_in=dimensions)
-            nengo.Connection(u, z, synapse=nengo.synapses.Lowpass(self.tau_input))
             
             xC = nengo.Ensemble(n_neurons, self.dimensions)
             sC = nengo.Node(size_in=n_neurons)  # pre filter
@@ -79,6 +78,7 @@ class NengoReservoir(nengo.Network):
             nengo.Connection(self.enable_learning, eC[0], synapse=None)
             self.input = u
             self.output = zC
+            self.train = z
             self.error = eC
             self.ensemble = xC
             self.weight_saver = WeightSaver(connC, weights_path)

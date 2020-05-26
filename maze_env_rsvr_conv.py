@@ -35,7 +35,7 @@ n_place_rsvr = 30
 learning_rate_place = 1e-4
 tau_place_probe = 0.05
 tau_place = 0.05
-T_train = 5.0
+T_train = 10.0
 
 # We'll make a simple object to implement the delayed connection
 class Delay:
@@ -103,16 +103,14 @@ with model:
     nengo.Connection(environment[3:n_sensors+3], linear_velocity,
                      function=lin_control_func, synapse=tau_sensory)
 
-    # Circular convolution of current sensory information and sensory
-    # information from the recent past
-
+    ## Combined sensory information
+    
     node_sensory = nengo.Node(size_in=ndim_sensory, output=lambda t,v: v)
 
     ens_sensory_cur = nengo.Ensemble(n_neurons=n_sensory, dimensions=ndim_sensory, radius=2.0)
     ens_sensory_del = nengo.Ensemble(n_neurons=n_sensory, dimensions=ndim_sensory, radius=2.0)
 
     nengo.Connection(environment[3:], node_sensory[1:], synapse=None)
-
     sensory_delay = Delay(ndim_sensory, timesteps=int(sensory_time_delay / dt))
     node_sensory_delay = nengo.Node(sensory_delay.step, size_in=ndim_sensory,
                                     size_out=ndim_sensory)
@@ -120,15 +118,7 @@ with model:
     nengo.Connection(node_sensory, node_sensory_delay, synapse=None)
     nengo.Connection(node_sensory_delay, ens_sensory_del, synapse=tau_sensory)
 
-    ens_sensory_bound = nengo.Ensemble(n_neurons=n_sensory_conv, dimensions=ndim_sensory)
-    
-    bind_sensory = nengo.networks.CircularConvolution(n_neurons=n_sensory_conv,
-                                                      dimensions=ndim_sensory)
-    nengo.Connection(ens_sensory_del, bind_sensory.A)
-    nengo.Connection(ens_sensory_cur, bind_sensory.B)
-    nengo.Connection(bind_sensory.output, ens_sensory_bound) 
-
-    # Place learning
+    ## Place learning
     
     place_learning = nengo.Node(size_in=1, output=lambda t,v: True if t < T_train else False)
 
@@ -136,7 +126,7 @@ with model:
                                learning_rate=learning_rate_place, tau=tau_place,
                                weights_path='maze_env_rsvr_place_rsvr_weights'  )
     
-    nengo.Connection(ens_sensory_bound, rsvr_place.input, synapse=None)
+    nengo.Connection(ens_sensory_del, rsvr_place.input, synapse=None)
     nengo.Connection(place_learning, rsvr_place.enable_learning, synapse=None)
 
     place_reader = nengo.Ensemble(n_place_rsvr*ndim_sensory, dimensions=ndim_sensory)
@@ -158,7 +148,7 @@ with model:
     # Connect the error into the learning rule
     nengo.Connection(place_error, place_reader_conn.learning_rule)
 
-    
+    ## Euclidean coordinates readout (for validation purposes only)
     xy_reader = nengo.Ensemble(n_place_rsvr*ndim_sensory, dimensions=2, radius=10)
     xy_error = nengo.Node(size_in=3, size_out=2,
                           output=lambda t, e: e[1:] if e[0] else 0.)
@@ -177,6 +167,19 @@ with model:
     nengo.Connection(place_learning, xy_error[0])
     nengo.Connection(xy_error, xy_reader_conn.learning_rule)
 
+    
+    ## Circular convolution of current sensory information and sensory
+    ## information from the recent past.
+
+    ens_sensory_bound = nengo.Ensemble(n_neurons=n_sensory_conv, dimensions=ndim_sensory)
+    
+    bind_sensory = nengo.networks.CircularConvolution(n_neurons=n_sensory_conv,
+                                                      dimensions=ndim_sensory)
+    nengo.Connection(ens_sensory_del, bind_sensory.A)
+    nengo.Connection(ens_sensory_cur, bind_sensory.B)
+    nengo.Connection(bind_sensory.output, ens_sensory_bound) 
+
+    ## TODO: bound representation -> assoc. reservoir -> ???
 
     
 def on_sim_exit(sim): 
