@@ -66,7 +66,7 @@ with model:
     nengo.Connection(environment[3:n_sensors+3], linear_velocity, function=lin_control_func,
                      synapse=tau_sensory)
     
-    ang_exc_const = nengo.Node([0.1])
+    ang_exc_const = nengo.Node([0.15])
     ang_exc = nengo.Ensemble(n_neurons=n_neurons, dimensions=1)
     nengo.Connection(ang_exc_const, ang_exc, synapse=tau_sensory)
     nengo.Connection(ang_exc, angular_velocity, transform=[[1.], [1.]])

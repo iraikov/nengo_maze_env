@@ -6,9 +6,11 @@ import nengo
 from nengo.utils.least_squares_solvers import LSMRScipy
 import nengolib
 from nengolib import RLS
+import nengo_extras
+from nengo_extras.plot_spikes import (
+    cluster, merge, plot_spikes, preprocess_spikes, sample_by_variance, sample_by_activity)
 from reservoir_net import NengoReservoir
 from ws import LoadFrom, WeightSaver
-import matplotlib.pyplot as plt
 
 # need to install mazelab to use this maze generator
 # https://github.com/zuoxingdong/mazelab
@@ -20,23 +22,25 @@ dt = 0.001
 dim_env = 15
 
 # parameters related to sensing and angular/linear velocity control
-n_sensors = 8
+n_sensors = 9
 n_t_sensors = 9
 tau_sensory = 0.004
-ang_exc = 0.5
 n_motor = 50
 
 # sensory binding network
 n_sensory = 50
-ndim_sensory = n_sensors + n_t_sensors + 1
+ndim_sensory = n_sensors + 1
 sensory_time_delay = 0.5 # s
 
 # parameters for place learning module
-n_rsvr_place = 30
+n_place = 50
 learning_rate_place = 1e-4
 tau_place_probe = 0.05
 tau_place = 0.05
 T_train = 5.0
+T_test = 5.0
+
+
 
 # We'll make a simple object to implement the delayed connection
 class Delay:
@@ -53,18 +57,23 @@ def inst_vel(dx):
     return du
     
 
+
 def sense_to_ang_vel(x, n_sensors):
     rotation_weights = np.linspace(-1, 1, n_sensors)
     res = np.dot(rotation_weights, np.array(x))
     return res
 
-# deadlock avoidance:
-#    if np.sum(x) <= 0.05*n_sensors:
-#    negative lin vel
-#    increase ang gain
-def sense_to_lin_vel(x, n_sensors):
-    min_center_dist = np.min(x[int(n_sensors/2)-1:int(n_sensors/2)+1])
-    res = min_center_dist
+def sense_to_lin_vel(x, n_sensors, v=0.5):
+    min_dist = np.min(x)
+    max_dist = np.max(x)
+    res = 0.
+    if max_dist > 0.:
+        res = v * max_dist
+    else:
+        if min_dist > 0.:
+            res = -v * min_dist
+        else:
+            res = -v 
     return res
 
 rng = np.random.RandomState(seed=seed)
@@ -92,20 +101,13 @@ with model:
 
     nengo.Connection(map_selector, environment[3]) # dimension 4
 
-    linear_velocity_gain = nengo.Node(output=lambda t, x: x[1] * x[0], size_in=2)
-    nengo.Connection(linear_velocity, linear_velocity_gain[0], synapse=None) 
-    nengo.Connection(linear_velocity_gain, environment[0], synapse=tau_sensory)
-
-    angular_velocity_gain = nengo.Node(output=lambda t, x: x[1] * x[0], size_in=2)
-    nengo.Connection(angular_velocity, angular_velocity_gain[0], synapse=None) 
-    nengo.Connection(angular_velocity_gain, environment[1], synapse=tau_sensory)
-    nengo.Connection(angular_velocity_gain, environment[2], synapse=tau_sensory)
-    
-
     ang_sensors = nengo.Node(output=lambda t, x: x,
                              size_in=n_sensors)
     nengo.Connection(environment[3:n_sensors+3], ang_sensors)
-    
+
+    nengo.Connection(linear_velocity, environment[0], synapse=tau_sensory) # dimension 1
+    nengo.Connection(angular_velocity, environment[2], synapse=tau_sensory) 
+
     ang_control_func = partial(sense_to_ang_vel, n_sensors = n_sensors)
     nengo.Connection(ang_sensors, angular_velocity,
                      function=ang_control_func,
@@ -115,6 +117,11 @@ with model:
     nengo.Connection(ang_sensors, linear_velocity,
                      function=lin_control_func,
                      synapse=tau_sensory)
+    
+    ang_exc_const = nengo.Node([0.125])
+    ang_exc = nengo.Ensemble(n_neurons=n_motor, dimensions=1)
+    nengo.Connection(ang_exc_const, ang_exc, synapse=tau_sensory)
+    nengo.Connection(ang_exc, angular_velocity)
 
 
     node_sensory = nengo.Node(size_in=ndim_sensory, output=lambda t,v: v)
@@ -133,23 +140,22 @@ with model:
 
 
     # Place learning
-    
     place_learning = nengo.Node(size_in=1, output=lambda t,v: True if t < T_train else False)
 
-    rsvr_place = NengoReservoir(n_per_dim = n_rsvr_place, dimensions=ndim_sensory, 
-                                learning_rate=learning_rate_place, tau=tau_place,
+    rsvr_place = NengoReservoir(n_per_dim = n_place, dimensions=ndim_sensory, 
+                                learning_rate=learning_rate_place, synapse=tau_place,
                                 weights_path='maze_env_rsvr_place_rsvr_weights'  )
     
     nengo.Connection(ens_sensory_del, rsvr_place.input, synapse=None)
     nengo.Connection(ens_sensory_cur, rsvr_place.train, synapse=None)
     nengo.Connection(place_learning, rsvr_place.enable_learning, synapse=None)
 
-    place_reader = nengo.Ensemble(n_rsvr_place*ndim_sensory, dimensions=ndim_sensory)
+    place_reader = nengo.Ensemble(n_place*ndim_sensory, dimensions=ndim_sensory)
     place_error = nengo.Node(size_in=ndim_sensory+1, size_out=ndim_sensory,
                              output=lambda t, e: e[1:] if e[0] else 0.)
 
     place_reader_conn = nengo.Connection(rsvr_place.ensemble.neurons, place_reader, synapse=None,
-                                        transform=np.zeros((ndim_sensory, n_rsvr_place*ndim_sensory)),
+                                        transform=np.zeros((ndim_sensory, n_place*ndim_sensory)),
                                         learning_rule_type=RLS(learning_rate=learning_rate_place,
                                                                pre_synapse=tau_place))
                                                                
@@ -163,6 +169,13 @@ with model:
     # Connect the error into the learning rule
     nengo.Connection(place_error, place_reader_conn.learning_rule)
 
+    ## Dimensionality reduction readout
+    xy_transform = np.random.choice(np.asarray([-1,0,1]),
+                                    size=(2, n_place*ndim_sensory),
+                                    p=[1/6,2/3,1/6])
+    xy_reader = nengo.Ensemble(n_place*ndim_sensory, dimensions=2)
+    nengo.Connection(place_reader.neurons, xy_reader, transform=xy_transform)
+    
     ## velocity reader module
 
     ens_pos_delta = nengo.Ensemble(n_sensory, dimensions=2)
@@ -173,39 +186,21 @@ with model:
     nengo.Connection(ens_pos_delta, vel_reader, function=inst_vel, synapse=tau_sensory)
     vel_target = nengo.Node(output=[1.1])
 
-    
-    linear_adapt = nengo.Ensemble(n_neurons=n_motor, dimensions=1)
-    nengo.Connection(linear_velocity, linear_adapt, synapse=tau_sensory)
-    linear_adapt_conn = nengo.Connection(linear_adapt, linear_velocity_gain[1],
-                                         learning_rule_type=RLS(learning_rate=1e-6),
-                                         synapse=tau_sensory)
-    linear_adapt_error = nengo.Node(size_in=1)
-    nengo.Connection(vel_reader, linear_adapt_error, transform=1, synapse=tau_sensory)
-    nengo.Connection(vel_target, linear_adapt_error, transform=-1, synapse=tau_sensory)
-    nengo.Connection(linear_adapt_error, linear_adapt_conn.learning_rule, synapse=tau_sensory)
-
-    angular_adapt = nengo.Ensemble(n_neurons=n_motor, dimensions=1)
-    nengo.Connection(angular_velocity, angular_adapt, synapse=tau_sensory)
-    angular_adapt_conn = nengo.Connection(angular_adapt, angular_velocity_gain[1],
-                                         learning_rule_type=RLS(learning_rate=1e-6),
-                                         synapse=tau_sensory)
-    nengo.Connection(linear_adapt_error, angular_adapt_conn.learning_rule, synapse=tau_sensory)
-
-    
 
     
 def on_sim_exit(sim): 
     # this will get triggered when the simulation is over
     rsvr_place.weight_saver.save(sim)
     place_reader_ws.save(sim)    
-    vel_reader_ws.save(sim)    
 
 
 #from nengo_extras.gexf import CollapsingGexfConverter
 #CollapsingGexfConverter().convert(model).write('maze_env_rsvr_obs.gexf')
 
 if __name__ == '__main__':
-    runtime = T_train
+    import matplotlib.pyplot as plt
+
+    runtime = T_train + T_test
     
     with model:
         tau_probe = 0.05
@@ -214,35 +209,69 @@ if __name__ == '__main__':
         #p_vel_error = nengo.Probe(vel_error, synapse=tau_probe)
         #p_vel_readout = nengo.Probe(vel_reader, synapse=tau_probe)
         #p_vel = nengo.Probe(vel_node, synapse=tau_probe)
-        p_place_error = nengo.Probe(place_reader, synapse=tau_probe)
-
+        p_place_reader = nengo.Probe(place_reader, synapse=tau_probe)
+        p_place_reader_spikes = nengo.Probe(place_reader.neurons,
+                                            attr='spikes',
+                                            synapse=tau_probe)
+        p_xy_reader = nengo.Probe(xy_reader,
+                                  synapse=tau_probe)
+        p_xy_reader_spikes = nengo.Probe(xy_reader.neurons,
+                                         attr='spikes',
+                                         synapse=tau_probe)
 
     with nengo.Simulator(model, progress_bar=True, dt=dt) as sim:
         sim.run(runtime)
 
+        on_sim_exit(sim)
+
+        t_train_idxs = np.where(sim.trange() <= T_train)[0]
+        
+        np.save("place_reader_spikes",
+                sim.data[p_place_reader_spikes])
+        np.save("place_reader",
+                sim.data[p_place_reader])
+        np.save("xy_reader",
+                sim.data[p_xy_reader])
+        np.save("xy_reader_spikes",
+                sim.data[p_xy_reader_spikes])
+        np.save("xy", sim.data[p_xy])
     
         plt.figure(figsize=(16, 6))
-        plt.title("Training Output")
-        plt.plot(sim.trange(), sim.data[p_xy],
-                 alpha=0.8, label="XY actual")
-        plt.plot(sim.trange(), sim.data[p_xy_readout],
-                 alpha=0.8, label="XY readout")
-        plt.legend()
+        plt.title("XY Position")
+        plt.plot(sim.trange(), sim.data[p_xy])
+        plt.xlabel("Time (s)")
+        plt.ylabel("Position")
         plt.show()
         
         plt.figure(figsize=(16, 6))
+        plt.title("XY Reader")
+        plt.plot(sim.trange(), sim.data[p_xy_reader])
+        plt.xlabel("Time (s)")
+        plt.ylabel("Position")
+        plt.show()
+
+        plt.figure(figsize=(16, 6))
         plt.title("Training Error")
-        plt.plot(sim.trange(), sim.data[p_vel_error],
-                 alpha=0.8, label="Vel error")
-        plt.plot(sim.trange(), np.mean(sim.data[p_place_error], axis=1),
+        plt.plot(sim.trange()[t_train_idxs], np.mean(sim.data[p_place_error][t_train_idxs], axis=1),
                  alpha=0.8, label="Mean place error")
         plt.xlabel("Time (s)")
         plt.ylabel("Output")
         plt.legend()
         plt.show()
 
-    
-    on_sim_exit(sim)
+        plt.figure(figsize=(16, 6))
+        plt.title("Place Reader Spikes")
+        plot_spikes(
+            *merge(
+                *cluster(
+                    *sample_by_variance(
+                        sim.trange(), sim.data[p_place_reader_spikes],
+                        num=500, filter_width=.02),
+                    filter_width=.002),
+                num=50))
+        plt.show()
+
+        
 
 
 
