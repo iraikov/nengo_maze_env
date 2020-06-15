@@ -2,7 +2,7 @@ import nengo
 import numpy as np
 import scipy.ndimage
 from functools import partial
-from nengo_maze_env.maze_env import NengoMazeEnvironment
+from nengo_maze_env.maze_env import NengoMazeEnvironment, MazeShape
 
 # need to install mazelab to use this maze generator
 # https://github.com/zuoxingdong/mazelab
@@ -44,7 +44,8 @@ with model:
             height=15,
             width=15,
             fov=125,
-            normalize_sensor_output=True
+            normalize_sensor_output=True,
+            maze_shape=MazeShape.MAZE_HANLON
         ),
         size_in=4,
         size_out=n_sensors + n_t_sensors + 4,

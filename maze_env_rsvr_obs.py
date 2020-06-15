@@ -29,7 +29,7 @@ n_motor = 50
 
 # sensory binding network
 n_sensory = 50
-ndim_sensory = n_sensors + 1
+ndim_sensory = n_sensors
 sensory_time_delay = 0.5 # s
 
 # parameters for place learning module
@@ -129,7 +129,7 @@ with model:
     ens_sensory_cur = nengo.Ensemble(n_neurons=n_sensory, dimensions=ndim_sensory, radius=2.0)
     ens_sensory_del = nengo.Ensemble(n_neurons=n_sensory, dimensions=ndim_sensory, radius=2.0)
 
-    nengo.Connection(environment[2:ndim_sensory+2], node_sensory, synapse=None)
+    nengo.Connection(environment[3:ndim_sensory+3], node_sensory, synapse=None)
 
     sensory_delay = Delay(ndim_sensory, timesteps=int(sensory_time_delay / dt))
     node_sensory_delay = nengo.Node(sensory_delay.step, size_in=ndim_sensory,

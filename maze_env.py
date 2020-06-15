@@ -2,12 +2,19 @@ import nengo
 import numpy as np
 import scipy.ndimage
 from skimage.data import immunohistochemistry, binary_blobs
+from skimage.draw import circle
 from functools import partial
-from mazelab.generators import random_shape_maze
+from mazelab.generators import random_shape_maze, morris_water_maze
 from aniso import anisodiff
+from enum import Enum
 
 # need to install mazelab to use this maze generator
 # https://github.com/zuoxingdong/mazelab
+
+class MazeShape(Enum):
+    MAZE_RANDOM = 1
+    MAZE_MORRIS = 2
+    MAZE_HANLON = 2
 
         
 def generate_sensor_readings(map_arr,
@@ -75,6 +82,7 @@ class NengoMazeEnvironment(object):
                  normalize_sensor_output=False,
                  input_type= 'directional_velocity',
                  dt=0.1,
+                 maze_shape=MazeShape.MAZE_RANDOM,
                 ):
 
         # Sets how inputs are interpreted
@@ -112,6 +120,8 @@ class NengoMazeEnvironment(object):
         # Save the last seed used so as to not regenerate a new map until needed
         self.current_seed = 0
 
+        self.maze_shape = maze_shape
+        
         # Create the default starting map
         self._generate_map()
 
@@ -141,9 +151,33 @@ class NengoMazeEnvironment(object):
         """
         # TODO: make sure this seed setting actually works
         np.random.seed(self.current_seed)
-        maze = random_shape_maze(width=self.width, height=self.height,
-                                 max_shapes=50, max_size=8, allow_overlap=False, shape=None,
-                                 seed=self.current_seed)
+        if self.maze_shape == MazeShape.MAZE_RANDOM:
+            maze = random_shape_maze(width=self.width, height=self.height,
+                                     max_shapes=50, max_size=8, allow_overlap=False, shape=None,
+                                     seed=self.current_seed)
+            
+        elif self.maze_shape == MazeShape.MAZE_MORRIS:
+            radius = int(self.width / 2) + 1 if self.width <= self.height else int(self.height / 2) + 1
+            maze = morris_water_maze(radius, platform_center=(0, 0), platform_radius=1)
+            
+        elif self.maze_shape == MazeShape.MAZE_HANLON:
+            radius = int(self.width / 2) + 1 if self.width <= self.height else int(self.height / 2) + 1
+            maze = morris_water_maze(radius, platform_center=(0, 0), platform_radius=1)
+
+            n_burrows = 6
+            burrow_radius = radius / 2.
+            burrow_radius = 1
+            for x in range(n_burrows):
+                print("x = %s" % str(x))
+                burrow_center = np.cos(2*np.pi/n_burrows*x)*burrow_radius, np.sin(2*np.pi/n_burrows*x)*burrow_radius
+                rr, cc = circle(*burrow_center, burrow_radius)
+                print(rr, cc)
+                burrow = np.zeros_like(maze)
+                burrow[rr, cc] = 3
+                maze += burrow
+
+        else:
+            raise RuntimeError("NengoMazeEnvironment: unknown maze shape %s" % str(self.maze_shape))
 
         self.maze = maze
 
