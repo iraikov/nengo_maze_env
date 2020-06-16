@@ -1,4 +1,6 @@
 import numpy as np
+import scipy
+from scipy.stats import skewnorm
 import nengo
 from nengolib import RLS
 from ws import WeightSaver
@@ -18,9 +20,12 @@ class NengoReservoir(nengo.Network):
                  tau_learn = 0.05, # filter for error
                  tau_probe = 0.05, # filter for readout
                  learning_rate = 1e-6,
-                 g = 1.5 * 1e-5, # 1.5 in
-                 g_in = 1,      # scale the input encoders (usually 1)
-                 g_out = 0.1,  # scale the recurrent encoders (usually 1)
+                 g_exc = 1.5 * 1e-5, # baseline excitatory synaptic weight
+                 g_inh = 4 * 1e-5, # baseline inhibitory synaptic weight
+                 ie = 0.2, # fraction of inhibitory to excitatory units
+                 g_in = 1.0,      # scale the input encoders (usually 1)
+                 g_out = 1.0,  # scale the recurrent encoders (usually 1)
+                 skewnorm_a = 4.0, # parameter for skew normal synaptic weight distribution
                  label = None,
                  seed = 0,
                  add_to_container = None,
@@ -35,20 +40,32 @@ class NengoReservoir(nengo.Network):
         self.tau_learn = tau_learn
         self.tau_probe = tau_probe
         self.learning_rate = learning_rate
-        self.g = g
+        self.g_exc = g_exc
+        self.g_inh = g_inh
         self.g_in = g_in
         self.g_out = g_out
-
+        assert ((ie < 1.0) and (ie >= 0.0))
+        self.ie = ie
+        
         rng = np.random.RandomState(seed=seed)
 
         n_neurons = n_per_dim*dimensions
+        n_inhibitory = int(self.ie * n_neurons)
+        n_excitatory = n_neurons - n_inhibitory
+
+        self.n_inhibitory = n_inhibitory
+        self.n_excitatory = n_excitatory
+        
         # fixed encoders for f_in (u_in)
         self.e_in = g_in * rng.uniform(-1, +1, (n_neurons, dimensions))  
         # fixed encoders for f_out (u)
         self.e_out = g_out * rng.uniform(-1, +1, (n_neurons, dimensions))  
         # target-generating weights (variance g^2/n)
-        self.JD = rng.randn(n_neurons, n_neurons) * g / np.sqrt(n_neurons)  
-
+        JI = skewnorm.rvs(-skewnorm_a, loc=-1, size=n_inhibitory*n_neurons, random_state=rng).reshape(n_inhibitory, n_neurons) * g_inh / np.sqrt(n_neurons)  
+        JE = skewnorm.rvs(skewnorm_a, loc=1, size=n_excitatory*n_neurons, random_state=rng).reshape(n_excitatory, n_neurons) * g_inh / np.sqrt(n_neurons)  
+        self.JD = np.zeros((n_neurons, n_neurons))
+        self.JD[:n_inhibitory,:] = np.clip(JI, None, 0.)
+        self.JD[n_inhibitory:,:] = np.clip(JE, 0., None)
         with self, self.rsvr_ens_config:
             u = nengo.Node(size_in=dimensions)
             z = nengo.Node(size_in=dimensions)
