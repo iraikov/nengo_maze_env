@@ -3,7 +3,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import nengo
-from hsp import HSP
+from isp import ISP
 
 
 seed = 21
@@ -12,7 +12,7 @@ with nengo.Network(seed=seed) as net:
     b = nengo.Ensemble(1, 1)
     weights = np.ones((1, 10)) * 1e-3
     conn = nengo.Connection(
-        a.neurons, b.neurons, transform=weights, learning_rule_type=HSP()
+        a.neurons, b.neurons, transform=weights, learning_rule_type=ISP()
     )
     
     p = nengo.Probe(conn, "weights")

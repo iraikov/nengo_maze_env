@@ -11,7 +11,7 @@ from nengo.builder.operator import DotInc, ElementwiseInc, Copy, Reset
 from nengo.connection import LearningRule
 from nengo.ensemble import Ensemble, Neurons
 
-# Creates new learning rule for homeostatic plasticity (HSP).
+# Creates new learning rule for inhibitory plasticity (ISP).
 # Based on the paper:
 #
 #    Inhibitory Plasticity Balances Excitation and Inhibition in Sensory
@@ -20,10 +20,11 @@ from nengo.ensemble import Ensemble, Neurons
 #    Science 334, 2011
 # 
 
-class HSP(LearningRuleType):
-    """HSP learning rule.  Modifies connection weights according to the
-    presynaptic and postsynaptic firing rates and the target firing
-    rate.
+class ISP(LearningRuleType):
+    """Inhibitory plasticity learning rule.  Modifies connection weights
+    according to the presynaptic and postsynaptic firing rates and the
+    target firing rate.
+
     """
     modifies = 'weights'
     probeable = ('pre_filtered', 'post_filtered', 'delta')
@@ -51,10 +52,10 @@ class HSP(LearningRuleType):
         return _remove_default_post_synapse(super()._argreprs, self.pre_synapse)
 
 
-# Builders for HSP
-class SimHSP(Operator):
-    r"""Calculate connection weight change according to the HSP rule.
-    Implements the STP learning rule of the form:
+# Builders for ISP
+class SimISP(Operator):
+    r"""Calculate connection weight change according to the inhibitory plasticity rule.
+    Implements the learning rule of the form:
     .. math:: \delta{} weight_{ij} = \kappa * (pre * post - \rho_0 * pre)
     where
     * :math:`\kappa` is a scalar learning rate
@@ -99,7 +100,7 @@ class SimHSP(Operator):
     """
 
     def __init__(self, pre_filtered, post_filtered, rho0, delta, learning_rate, tag=None):
-        super(SimHSP, self).__init__(tag=tag)
+        super(SimISP, self).__init__(tag=tag)
         self.learning_rate = learning_rate
         self.rho0 = rho0
         
@@ -136,43 +137,43 @@ class SimHSP(Operator):
         kappa = self.learning_rate * dt
         rho0 = self.rho0
 
-        def step_simhsp():
+        def step_simisp():
             delta[...] = kappa * (pre_filtered * post_filtered - rho0 * pre_filtered)
-        return step_simhsp
+        return step_simisp
 
     
-@Builder.register(HSP)
-def build_hsp(model, hsp, rule):
-    """Builds a `.HSP` object into a model.
+@Builder.register(ISP)
+def build_isp(model, isp, rule):
+    """Builds a `.ISP` object into a model.
     Calls synapse build functions to filter the pre and post activities,
-    and adds a `.SimHSP` operator to the model to calculate the delta.
+    and adds a `.SimISP` operator to the model to calculate the delta.
     Parameters
     ----------
     model : Model
         The model to build into.
-    hsp : HSP
+    isp : ISP
         Learning rule type to build.
     rule : LearningRule
         The learning rule object corresponding to the neuron type.
     Notes
     -----
     Does not modify ``model.params[]`` and can therefore be called
-    more than once with the same `.HSP` instance.
+    more than once with the same `.ISP` instance.
     """
 
     conn = rule.connection
     pre_activities = model.sig[get_pre_ens(conn).neurons]["out"]
     post_activities = model.sig[get_post_ens(conn).neurons]["out"]
-    pre_filtered = build_or_passthrough(model, hsp.pre_synapse, pre_activities)
-    post_filtered = build_or_passthrough(model, hsp.post_synapse, post_activities)
+    pre_filtered = build_or_passthrough(model, isp.pre_synapse, pre_activities)
+    post_filtered = build_or_passthrough(model, isp.post_synapse, post_activities)
 
     model.add_op(
-        SimHSP(
+        SimISP(
             pre_filtered,
             post_filtered,
-            hsp.rho0,
+            isp.rho0,
             model.sig[rule]["delta"],
-            learning_rate=hsp.learning_rate,
+            learning_rate=isp.learning_rate,
         )
     )
 
