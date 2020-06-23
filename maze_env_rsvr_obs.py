@@ -23,7 +23,6 @@ dim_env = 15
 
 # parameters related to sensing and angular/linear velocity control
 n_sensors = 9
-n_t_sensors = 9
 tau_sensory = 0.004
 n_motor = 50
 
@@ -93,7 +92,7 @@ with model:
             normalize_sensor_output=True
         ),
         size_in=4,
-        size_out=n_sensors + n_t_sensors + 4,
+        size_out=2*n_sensors + 4,
     )
 
     linear_velocity = nengo.Ensemble(n_neurons=n_motor, dimensions=1)

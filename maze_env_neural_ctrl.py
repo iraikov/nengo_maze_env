@@ -10,7 +10,6 @@ from nengo_maze_env.maze_env import NengoMazeEnvironment, MazeShape
 dt = 0.001
 tau_sensory = 0.004
 n_sensors = 9
-n_t_sensors = 9
 n_neurons = 50
 
 def sense_to_ang_vel(x, n_sensors):
@@ -48,7 +47,7 @@ with model:
             maze_shape=MazeShape.MAZE_HANLON
         ),
         size_in=4,
-        size_out=n_sensors + n_t_sensors + 4,
+        size_out=2*n_sensors + 4,
     )
 
     linear_velocity = nengo.Ensemble(n_neurons=n_neurons, dimensions=1)
