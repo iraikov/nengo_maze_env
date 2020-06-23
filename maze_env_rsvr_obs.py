@@ -1,7 +1,7 @@
 import numpy as np
 import scipy.ndimage
 from functools import partial
-from nengo_maze_env.maze_env import NengoMazeEnvironment
+from nengo_maze_env.maze_env import NengoMazeEnvironment, MazeShape
 import nengo
 from nengo.utils.least_squares_solvers import LSMRScipy
 import nengolib
@@ -89,7 +89,8 @@ with model:
             height=dim_env,
             width=dim_env,
             fov=125,
-            normalize_sensor_output=True
+            normalize_sensor_output=True,
+            maze_shape=MazeShape.MAZE_HANLON
         ),
         size_in=4,
         size_out=2*n_sensors + 4,
