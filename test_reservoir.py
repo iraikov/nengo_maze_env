@@ -25,8 +25,8 @@ dt = 0.002
 trials_train = 3
 trials_test = 4
 
-ndim = 3
-n = 100
+ndim = 5
+n = 20
 learning_rate = 1e-6
 seed = 21
 tau_probe = 0.05
@@ -53,7 +53,9 @@ with nengo.Network(seed=seed) as model:
     
     learning = nengo.Node(size_in=1, output=lambda t,v: True if t < T_train else False)
 
-    rsvr = NengoReservoir(n_per_dim = n, dimensions=ndim, learning_rate=learning_rate, tau=tau)
+    rsvr = NengoReservoir(n_per_dim = n, dimensions=ndim, learning_rate=learning_rate, tau=tau,
+                          ie = 0.2, skewnorm_a_inh=8.0
+                          )
     nengo.Connection(u, rsvr.input, synapse=None)
     nengo.Connection(z, rsvr.train, synapse=None)
     nengo.Connection(learning, rsvr.enable_learning, synapse=None)

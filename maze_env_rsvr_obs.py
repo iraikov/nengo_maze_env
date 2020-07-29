@@ -1,3 +1,4 @@
+import math
 import numpy as np
 import scipy.ndimage
 from functools import partial
@@ -27,15 +28,18 @@ tau_sensory = 0.004
 n_motor = 50
 
 # sensory binding network
-n_sensory = 50
-ndim_sensory = n_sensors
-sensory_time_delay = 0.5 # s
+n_sensory = 10
+ndim_sensory_distance = n_sensors
+ndim_sensory_texture = n_sensors
+ndim_sensory = ndim_sensory_texture  + ndim_sensory_distance
+sensory_time_delay = 0.25 # s
 
 # parameters for place learning module
-n_place = 50
-learning_rate_place = 1e-4
+n_place = 100
+learning_rate_place = 1e-5
 tau_place_probe = 0.05
 tau_place = 0.05
+tau_reward = 0.1
 T_train = 5.0
 T_test = 5.0
 
@@ -44,12 +48,13 @@ T_test = 5.0
 # We'll make a simple object to implement the delayed connection
 class Delay:
     def __init__(self, dimensions, timesteps=50):
-        self.history = np.zeros((timesteps, dimensions))
+        self.history = np.zeros((dimensions, timesteps))
 
     def step(self, t, x):
-        self.history = np.roll(self.history, -1)
-        self.history[-1] = x
-        return self.history[0]
+        result = np.copy(self.history[:,0])
+        self.history = np.roll(self.history, (0, -1))
+        self.history[:,-1] = x
+        return result
 
 def inst_vel(dx):
     du = np.sqrt(dx[0]**2. + dx[1]**2)
@@ -90,20 +95,21 @@ with model:
             width=dim_env,
             fov=125,
             normalize_sensor_output=True,
-            maze_shape=MazeShape.MAZE_HANLON
+            reward_location=(10,10),
+            maze_shape=MazeShape.MAZE_HANLON,
+            maze_kwargs={'n_objects': 15}
         ),
         size_in=4,
-        size_out=2*n_sensors + 4,
+        size_out=2*n_sensors + 6,
     )
 
     linear_velocity = nengo.Ensemble(n_neurons=n_motor, dimensions=1)
     angular_velocity = nengo.Ensemble(n_neurons=n_motor, dimensions=1)
 
     nengo.Connection(map_selector, environment[3]) # dimension 4
-
-    ang_sensors = nengo.Node(output=lambda t, x: x,
-                             size_in=n_sensors)
-    nengo.Connection(environment[3:n_sensors+3], ang_sensors)
+    
+    ang_sensors = nengo.Node(output=lambda t, x: x, size_in=n_sensors)
+    nengo.Connection(environment[5:n_sensors+5], ang_sensors)
 
     nengo.Connection(linear_velocity, environment[0], synapse=tau_sensory) # dimension 1
     nengo.Connection(angular_velocity, environment[2], synapse=tau_sensory) 
@@ -118,25 +124,47 @@ with model:
                      function=lin_control_func,
                      synapse=tau_sensory)
     
-    ang_exc_const = nengo.Node([0.125])
+    ang_exc_const = nengo.Node([0.25])
     ang_exc = nengo.Ensemble(n_neurons=n_motor, dimensions=1)
     nengo.Connection(ang_exc_const, ang_exc, synapse=tau_sensory)
     nengo.Connection(ang_exc, angular_velocity)
 
+    node_xy = nengo.Node(size_in=2, size_out=2,
+                         output=lambda t,v: v)
 
-    node_sensory = nengo.Node(size_in=ndim_sensory, output=lambda t,v: v)
+    node_reward = nengo.Node(size_in=1, size_out=1,
+                             output=lambda t,v: v)
+    
+    
+    node_sensory = nengo.Node(output=lambda t,v: v,
+                              size_in=ndim_sensory,
+                              size_out=ndim_sensory)
+    ## Derivative of x and y position
+    #nengo.Connection(environment[2],
+    #                 node_sensory[0], synapse=None)
+    #nengo.Connection(environment[3],
+    #                 node_sensory[1], synapse=None)
+    nengo.Connection(environment[5+ndim_sensory_distance:ndim_sensory_texture+ndim_sensory_distance+5],
+                     node_sensory[:ndim_sensory_texture],
+                     synapse=None)
+    nengo.Connection(environment[5:ndim_sensory_distance+5],
+                     node_sensory[ndim_sensory_texture:ndim_sensory_distance+ndim_sensory_texture],
+                     synapse=None)
 
-    ens_sensory_cur = nengo.Ensemble(n_neurons=n_sensory, dimensions=ndim_sensory, radius=2.0)
-    ens_sensory_del = nengo.Ensemble(n_neurons=n_sensory, dimensions=ndim_sensory, radius=2.0)
-
-    nengo.Connection(environment[3:ndim_sensory+3], node_sensory, synapse=None)
-
+    
+    node_sensory_cur = nengo.Node(output=lambda t,v: v,
+                                  size_in=ndim_sensory,
+                                  size_out=ndim_sensory)
     sensory_delay = Delay(ndim_sensory, timesteps=int(sensory_time_delay / dt))
-    node_sensory_delay = nengo.Node(sensory_delay.step, size_in=ndim_sensory,
-                                    size_out=ndim_sensory)
-    nengo.Connection(node_sensory, ens_sensory_cur, synapse=tau_sensory)
-    nengo.Connection(node_sensory, node_sensory_delay, synapse=None)
-    nengo.Connection(node_sensory_delay, ens_sensory_del, synapse=tau_sensory)
+    node_sensory_del = nengo.Node(sensory_delay.step,
+                                  size_in=ndim_sensory,
+                                  size_out=ndim_sensory)
+    
+    nengo.Connection(node_sensory, node_sensory_cur, synapse=None)
+    nengo.Connection(node_sensory, node_sensory_del, synapse=None)
+
+    nengo.Connection(environment[:2], node_xy, synapse=None)
+    nengo.Connection(environment[ndim_sensory+5], node_reward, synapse=None)
 
 
     # Place learning
@@ -144,48 +172,53 @@ with model:
 
     rsvr_place = NengoReservoir(n_per_dim = n_place, dimensions=ndim_sensory, 
                                 learning_rate=learning_rate_place, synapse=tau_place,
+                                ie = 0.2, skewnorm_a_inh=9.0, g_inh = 9 * 1e-5,
                                 weights_path='maze_env_rsvr_place_rsvr_weights'  )
     
-    nengo.Connection(ens_sensory_del, rsvr_place.input, synapse=None)
-    nengo.Connection(ens_sensory_cur, rsvr_place.train, synapse=None)
     nengo.Connection(place_learning, rsvr_place.enable_learning, synapse=None)
 
-    place_reader = nengo.Ensemble(n_place*ndim_sensory, dimensions=ndim_sensory)
-    place_error = nengo.Node(size_in=ndim_sensory+1, size_out=ndim_sensory,
-                             output=lambda t, e: e[1:] if e[0] else 0.)
+    nengo.Connection(node_sensory_del, rsvr_place.input, synapse=tau_sensory)
+    nengo.Connection(node_sensory_cur, rsvr_place.train, synapse=tau_sensory)
 
-    place_reader_conn = nengo.Connection(rsvr_place.ensemble.neurons, place_reader, synapse=None,
-                                        transform=np.zeros((ndim_sensory, n_place*ndim_sensory)),
-                                        learning_rule_type=RLS(learning_rate=learning_rate_place,
-                                                               pre_synapse=tau_place))
+#    place_reader = nengo.Ensemble(n_place*ndim_sensory, dimensions=ndim_sensory)
+#    place_error = nengo.Node(size_in=ndim_sensory+1, size_out=ndim_sensory,
+#                             output=lambda t, e: e[1:] if e[0] else 0.)
+
+#    place_reader_conn = nengo.Connection(rsvr_place.ensemble.neurons, place_reader, synapse=None,
+#                                        transform=np.zeros((ndim_sensory, n_place*ndim_sensory)),
+#                                        learning_rule_type=RLS(learning_rate=learning_rate_place,
+#                                                               pre_synapse=tau_place))
                                                                
-    place_reader_ws = WeightSaver(place_reader_conn, 'maze_env_rsvr_place_reader_weights')
+#    place_reader_ws = WeightSaver(place_reader_conn, 'maze_env_rsvr_place_reader_weights')
     
     # Error = actual - target = post - pre
-    nengo.Connection(place_reader, place_error[1:])
-    nengo.Connection(ens_sensory_cur, place_error[1:], transform=-1)
+#    nengo.Connection(place_reader, place_error[1:])
+#    nengo.Connection(node_sensory_cur, place_error[1:ndim_sensory+1], transform=-1, synapse=tau_sensory)
 
-    nengo.Connection(place_learning, place_error[0])
+#    nengo.Connection(place_learning, place_error[0])
     # Connect the error into the learning rule
-    nengo.Connection(place_error, place_reader_conn.learning_rule)
-
-    ## Dimensionality reduction readout
-    xy_transform = np.random.choice(np.asarray([-1,0,1]),
-                                    size=(2, n_place*ndim_sensory),
-                                    p=[1/6,2/3,1/6])
-    xy_reader = nengo.Ensemble(n_place*ndim_sensory, dimensions=2)
-    nengo.Connection(place_reader.neurons, xy_reader, transform=xy_transform)
+#    nengo.Connection(place_error, place_reader_conn.learning_rule)
     
-    ## velocity reader module
+    ## Dimensionality reduction readout
+#    xy_transform = np.random.choice(np.asarray([-1,0,1]),
+#                                    size=(2, n_place*ndim_sensory),
+#                                    p=[1/6,2/3,1/6])
+#    nengo.Connection(rsvr_place, xy_reader, transform=xy_transform)
 
-    ens_pos_delta = nengo.Ensemble(n_sensory, dimensions=2)
-    nengo.Connection(environment[:2], ens_pos_delta, synapse=None, transform=(1./dt))
-    nengo.Connection(environment[:2], ens_pos_delta, synapse=0, transform=(-1./dt))
+    value = nengo.Ensemble(n_place, dimensions=1)
+    value_conn = nengo.Connection(rsvr_place.output, value, function=lambda x: 0,
+                                  learning_rule_type=RLS(learning_rate=learning_rate_place,
+                                                         pre_synapse=tau_place))
+    
+    # this connection adds the reward to the learning signal
+    nengo.Connection(node_reward, value_conn.learning_rule, transform=-1, synapse=tau_value)
 
-    vel_reader = nengo.Ensemble(n_sensory, dimensions=1, n_eval_points=5000)
-    nengo.Connection(ens_pos_delta, vel_reader, function=inst_vel, synapse=tau_sensory)
-    vel_target = nengo.Node(output=[1.1])
+    # this connection adds the observed value
+    nengo.Connection(value, value_conn.learning_rule, transform=-0.9, synapse=0.01)
 
+    # this connection subtracts the predicted value
+    nengo.Connection(value, learn_conn.learning_rule, transform=1, synapse=tau_value)
+                   
 
     
 def on_sim_exit(sim): 
@@ -205,16 +238,12 @@ if __name__ == '__main__':
     with model:
         tau_probe = 0.05
         p_place_error = nengo.Probe(place_error, synapse=tau_probe)
-        p_xy = nengo.Probe(environment[:2], synapse=tau_probe)
-        #p_vel_error = nengo.Probe(vel_error, synapse=tau_probe)
-        #p_vel_readout = nengo.Probe(vel_reader, synapse=tau_probe)
-        #p_vel = nengo.Probe(vel_node, synapse=tau_probe)
+        p_xy = nengo.Probe(node_xy, synapse=tau_probe)
         p_place_reader = nengo.Probe(place_reader, synapse=tau_probe)
         p_place_reader_spikes = nengo.Probe(place_reader.neurons,
                                             attr='spikes',
                                             synapse=tau_probe)
-        p_xy_reader = nengo.Probe(xy_reader,
-                                  synapse=tau_probe)
+        p_xy_reader = nengo.Probe(xy_reader, synapse=tau_probe)
         p_xy_reader_spikes = nengo.Probe(xy_reader.neurons,
                                          attr='spikes',
                                          synapse=tau_probe)
@@ -230,12 +259,13 @@ if __name__ == '__main__':
                 sim.data[p_place_reader_spikes])
         np.save("place_reader",
                 sim.data[p_place_reader])
+        np.save("xy", sim.data[p_xy])
         np.save("xy_reader",
                 sim.data[p_xy_reader])
         np.save("xy_reader_spikes",
                 sim.data[p_xy_reader_spikes])
-        np.save("xy", sim.data[p_xy])
-    
+
+        
         plt.figure(figsize=(16, 6))
         plt.title("XY Position")
         plt.plot(sim.trange(), sim.data[p_xy])

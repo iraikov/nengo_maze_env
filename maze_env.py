@@ -7,6 +7,7 @@ from functools import partial
 from mazelab.generators import random_shape_maze, morris_water_maze
 from aniso import anisodiff
 from enum import Enum
+from collections import defaultdict
 
 # need to install mazelab to use this maze generator
 # https://github.com/zuoxingdong/mazelab
@@ -38,13 +39,18 @@ def generate_sensor_readings(map_arr,
 
     readings = []
     for i, ang in enumerate(angs):
-        dist, texture = get_collision_coord(arr_zoom, object_map, x*zoom_level, y*zoom_level, ang, max_sensor_dist*zoom_level)
+        dist, ix, iy = get_collision_coord(arr_zoom, x*zoom_level, y*zoom_level, ang, max_sensor_dist*zoom_level)
+        texture = 0.
+        if (ix > -1) and (iy > -1):
+            sx = ix/zoom_level
+            sy = iy/zoom_level
+            if int(sx) in object_map:
+                if int(sy) in object_map[int(sx)]:
+                    texture = object_map[int(sx)][int(sy)]
         readings.append((dist / zoom_level, texture))
     return readings
 
-def get_collision_coord(map_array, object_map, x, y, th,
-                        max_sensor_dist=10*4,
-                       ):
+def get_collision_coord(map_array, x, y, th, max_sensor_dist=10*4,):
     """
     Find the first occupied space given a start point and direction
     Meant for a zoomed in map_array
@@ -66,13 +72,9 @@ def get_collision_coord(map_array, object_map, x, y, th,
         ix = int(cx)
         iy = int(cy)
         if map_array[ix, iy] > 0.:
-            if (ix, iy) in object_map:
-                texture = object_map[(ix, iy)]
-            else:
-                texture = 0.
-            return i, texture
-
-    return max_sensor_dist, 0.
+            return i, ix, iy
+        
+    return max_sensor_dist, -1, -1
 
 class NengoMazeEnvironment(object):
     """
@@ -130,6 +132,10 @@ class NengoMazeEnvironment(object):
         self.maze_kwargs = maze_kwargs
         self.maze_shape = maze_shape
         
+        # Create the default reward map
+        self.reward_location = reward_location
+        self._generate_reward_map()
+
         # Create the default starting texture
         self.kappa = kappa
         self._generate_texture_map()
@@ -137,16 +143,14 @@ class NengoMazeEnvironment(object):
         # Create the default starting map
         self._generate_map()
 
-        # Create the default reward map
-        self.reward_location = reward_location
-        self._generate_reward_map()
-
         # Set up svg element templates to be filled in later
+        self.platform_template =  '<rect x={0} y={1} width=1 height=1 style="fill:none;stroke:black;stroke-width:5;fill-opacity:0.1;stroke-opacity:0.9"/>'
+               
         self.tile_template =  '<rect x={0} y={1} width=1 height=1 style="fill:black;"/>' 
         self.object_template =  '<rect x={0} y={1} width=1 height=1 style="fill:black;fill-opacity:{2};"/>' 
         self.reward_template =  '<rect x={0} y={1} width=1 height=1 style="fill:red;fill-opacity:{2};"/>' 
         self.agent_template = '<polygon points="0.25,0.25 -0.25,0.25 0,-0.5" style="fill:blue" transform="translate({0},{1}) rotate({2})"/>'
-        self.sensor_template = '<line x1="{0}" y1="{1}" x2="{2}" y2="{3}" style="stroke:rgb(128,128,128);stroke-width:.1"/>'
+        self.sensor_template = '<line x1="{0}" y1="{1}" x2="{2}" y2="{3}" style="stroke:rgba(128,128,128,{4});stroke-width:.1"/>'
         self.svg_header = '<svg width="100%%" height="100%%" viewbox="0 0 {0} {1}">'.format(self.height, self.width)
 
         # self.cue_symbol = '<rect x={0} y={1} width=10 height=10 style="fill:red"/>'
@@ -159,7 +163,7 @@ class NengoMazeEnvironment(object):
         """
         # TODO: make sure this seed setting actually works
         np.random.seed(self.current_seed)
-        self.object_map = {}
+        self.object_map = defaultdict(lambda: dict())
 
         if self.maze_shape == MazeShape.MAZE_RANDOM:
             maze = random_shape_maze(width=self.width, height=self.height,
@@ -173,17 +177,17 @@ class NengoMazeEnvironment(object):
         elif self.maze_shape == MazeShape.MAZE_HANLON:
             
             radius = int(self.width / 2) + 1 if self.width <= self.height else int(self.height / 2) + 1
-            maze = morris_water_maze(radius, platform_center=(self.width/2, self.height/2), platform_radius=1)
-
+            maze = morris_water_maze(radius, platform_center=(self.width/2, self.height/2), platform_radius=0.)
             n_objects = self.maze_kwargs.get("n_objects", 4)
             object_radius = self.maze_kwargs.get("object_radius", 1.)
             for i in range(n_objects):
                 while True:
                     x, y = np.random.randint(1, self.width), np.random.randint(1, self.height)
-                    if (maze[x, y] == 0) and ((x, y) not in self.object_map):
+                    if (maze[x, y] == 0) and not ((x,y) == self.reward_location):
                         maze[x, y] = self.texture_map[x, y]
-                        self.object_map[(x, y)] = self.texture_map[x, y]
+                        self.object_map[x][y] = self.texture_map[x, y]
                         break
+            #print(self.object_map)
 
         else:
             raise RuntimeError("NengoMazeEnvironment: unknown maze shape %s" % str(self.maze_shape))
@@ -198,7 +202,8 @@ class NengoMazeEnvironment(object):
         
         texture_map = binary_blobs(length=max(self.width, self.height),n_dim=2)
 
-        result = anisodiff(texture_map, niter=10, kappa=self.kappa)
+        result = anisodiff(texture_map, niter=10, option=1, kappa=self.kappa)
+
         self.texture_map = result
 
     def _generate_reward_map(self):
@@ -222,11 +227,13 @@ class NengoMazeEnvironment(object):
             for j in range(self.width):
                 # For simplicity and efficiency, only draw the walls and not the empty space
                 # This will have to change when tiles can have different colours
-                if (i,j) in self.object_map:
-                    tiles.append(self.object_template.format(i, j, self.object_map[(i,j)]))
+                if (i in self.object_map) and (j in self.object_map[i]):
+                    tiles.append(self.object_template.format(i, j, abs(self.object_map[i][j])))
                 elif (i,j) in self.reward_map:
                     tiles.append(self.reward_template.format(i, j, self.reward_map[(i,j)]))
-                elif self.maze[i, j] == 1:
+#                elif self.maze[i, j] == 3.:
+#                    tiles.append(self.platform_template.format(i, j))
+                elif self.maze[i, j] == 1.:
                     tiles.append(self.tile_template.format(i, j))
 
                     
@@ -264,7 +271,8 @@ class NengoMazeEnvironment(object):
         for i, dist in enumerate(self.sensor_dists):
             sx = dist*np.cos(start_ang + i*ang_interval) + self.x
             sy = dist*np.sin(start_ang + i*ang_interval) + self.y
-            lines.append(self.sensor_template.format(self.x, self.y, sx, sy))
+            texture = self.sensor_textures[i]
+            lines.append(self.sensor_template.format(self.x, self.y, sx, sy, 1.-texture))
         svg += ''.join(lines)
 
         svg += agent
@@ -277,6 +285,7 @@ class NengoMazeEnvironment(object):
 
         x = self.x
         y = self.y
+        th = self.th
         
         if self.input_type == 'holonomic_velocity':
             x += v[0] * self.dt
@@ -291,6 +300,7 @@ class NengoMazeEnvironment(object):
             y = v[1]
             self.th = v[2]
 
+        dth = (th - self.th) / self.dt
         
         zoom_level = 2
         map_array = scipy.ndimage.zoom(self.maze, zoom_level, order=0)
@@ -299,14 +309,15 @@ class NengoMazeEnvironment(object):
         dx = 0.
         dy = 0.
         if map_array[cx, cy] == 0.:
-            dx = self.x - x
-            dy = self.y - y
+            dx = (self.x - x) / self.dt
+            dy = (self.y - y) / self.dt
             self.x = x
             self.y = y
 
         # Keep the agent within the bounds of the maze
         self.x = np.clip(self.x, 1, self.width - 1)
         self.y = np.clip(self.y, 1, self.height - 1)
+        dth =
         if self.th > 2*np.pi:
             self.th -= 2*np.pi
         elif self.th < -2*np.pi:
@@ -331,6 +342,8 @@ class NengoMazeEnvironment(object):
         iy = int(self.y)
         self.reward[0] = self.reward_map.get((ix, iy), 0.0)
 
+        #print(self.sensor_textures)
         #return self.sensor_dists
-        return np.concatenate([[self.x], [self.y], [self.th / (2*np.pi)],
+        return np.concatenate([[self.x], [self.y], [dx], [dy],
+                               [(self.th / (2*np.pi)) + 1.],
                               self.sensor_dists, self.sensor_textures, self.reward])
