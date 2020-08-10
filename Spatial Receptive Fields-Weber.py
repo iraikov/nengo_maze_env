@@ -1,7 +1,4 @@
-#!/usr/bin/env python
-# coding: utf-8
 
-# In[1]:
 
 from functools import partial
 import numpy as np
@@ -24,7 +21,7 @@ from nengo_extras.neurons import (
 # In[2]:
 
 
-def generate_linear_trajectory(trajectory, temporal_resolution=1., velocity=30., equilibration_duration=None):
+def generate_linear_trajectory(input_trajectory, temporal_resolution=1., velocity=30., equilibration_duration=None, n_trials=1):
     """
     Construct coordinate arrays for a spatial trajectory, considering run velocity to interpolate at the specified
     temporal resolution. Optionally, the trajectory can be prepended with extra distance traveled for a specified
@@ -36,6 +33,12 @@ def generate_linear_trajectory(trajectory, temporal_resolution=1., velocity=30.,
     :param equilibration_duration: float (s)
     :return: tuple of array
     """
+
+    trajectory_lst = []
+    for i_trial in range(n_trials):
+        trajectory_lst.append(input_trajectory)
+
+    trajectory = np.concatenate(trajectory_lst)
         
     velocity = velocity  # (cm / s)
     spatial_resolution = velocity * temporal_resolution
@@ -67,15 +70,16 @@ def generate_linear_trajectory(trajectory, temporal_resolution=1., velocity=30.,
 
 # In[3]:
 
-
+arena_margin = 0.25
 arena_dimension = 200
-vert = np.array([[-arena_dimension,-arena_dimension],[-arena_dimension,arena_dimension],
-                 [arena_dimension,arena_dimension],[arena_dimension,-arena_dimension]])
+arena_extent = arena_dimension * (1. + arena_margin)
+vert = np.array([[-arena_extent,-arena_extent],[-arena_extent,arena_extent],
+                 [arena_extent,arena_extent],[arena_extent,-arena_extent]])
 smp = np.array([[0,1],[1,2],[2,3],[3,0]])
     
 arena_res = 5
-arena_x = np.arange(-arena_dimension, arena_dimension, arena_res)
-arena_y = np.arange(-arena_dimension, arena_dimension, arena_res)
+arena_x = np.arange(-arena_extent, arena_extent, arena_res)
+arena_y = np.arange(-arena_extent, arena_extent, arena_res)
 
 arena_xx, arena_yy = np.meshgrid(arena_x, arena_y, indexing='ij')
 peak_rate = 1.
@@ -113,7 +117,7 @@ def generate_input_rates(module_field_width_dict, basis_function='gaussian', spa
     return input_nodes_dict, input_groups_dict, input_rates_dict
 
 exc_input_nodes_dict, exc_input_groups_dict, exc_input_rates_dict = \
-    generate_input_rates(exc_module_field_width_dict, spacing_factor=0.5, peak_rate=peak_rate)
+    generate_input_rates(exc_module_field_width_dict, spacing_factor=0.8, peak_rate=peak_rate)
 inh_input_nodes_dict, inh_input_groups_dict, inh_input_rates_dict = \
     generate_input_rates(inh_module_field_width_dict, spacing_factor=1.0, peak_rate=peak_rate)
 
@@ -151,7 +155,7 @@ plot_input_rates(inh_input_rates_dict)
 
 
 diag_trajectory = np.asarray([[-100, -100], [100, 100]])
-trj_t, trj_x, trj_y, trj_d = generate_linear_trajectory(diag_trajectory, temporal_resolution=0.001)
+trj_t, trj_x, trj_y, trj_d = generate_linear_trajectory(diag_trajectory, temporal_resolution=0.001, n_trials=4)
     
 exc_trajectory_input_rates = { m: {} for m in exc_input_rates_dict }
 inh_trajectory_input_rates = { m: {} for m in inh_input_rates_dict }
@@ -195,6 +199,8 @@ def trajectory_input(trajectory_inputs, t, centered=False):
 def make_weber_srf_model():
         with nengo.Network(label="Weber spatial receptive field model", seed=19) as model:
 
+            rng = np.random.RandomState(seed=19)
+            
             N_Exc = len(exc_trajectory_inputs)
             N_Inh = len(inh_trajectory_inputs)
             model.ExcInput = nengo.Node(partial(trajectory_input, exc_trajectory_inputs),
@@ -210,7 +216,7 @@ def make_weber_srf_model():
             model.Inh = nengo.Ensemble(N_Inh, dimensions=1,
                                        neuron_type=nengo.RectifiedLinear(),
                                        intercepts=nengo.dists.Choice([0.1]),
-                                       max_rates=nengo.dists.Choice([20]))
+                                       max_rates=nengo.dists.Choice([40]))
             
             model.Output = nengo.Ensemble(1, dimensions=1,
                                           neuron_type=nengo.LIFRate(),
@@ -222,17 +228,26 @@ def make_weber_srf_model():
             nengo.Connection(model.InhInput, model.Inh.neurons, synapse=nengo.Lowpass(0.01),
                              transform=np.eye(N_Inh))
 
+            
             #model.conn_EI = nengo.Connection(model.Exc.neurons, model.Inh.neurons,
             #                                 transform=np.ones((N_Inh, N_Exc)) * 1e-6,
             #                                 synapse=nengo.Alpha(0.01))
+            weights_dist_I =rng.normal(size=N_Inh).reshape((1, N_Inh))
+            weights_initial_I = (weights_dist_I - weights_dist_I.min()) / (weights_dist_I.max() - weights_dist_I.min()) * -1e-2
+            plt.hist(weights_initial_I.flat)
+            plt.show()
             model.conn_I = nengo.Connection(model.Inh.neurons, model.Output.neurons,
-                                           transform=np.random.normal(size=N_Inh).reshape((1, N_Inh)) * -1e-1,
-                                           synapse=nengo.Alpha(0.01), 
-                                           learning_rule_type=ISP(learning_rate=2e-6, rho0=2.))
+                                            transform=weights_initial_I,
+                                            synapse=nengo.Alpha(0.01), 
+                                            learning_rule_type=ISP(learning_rate=4e-6, rho0=1.))
+            weights_dist_E = rng.normal(size=N_Exc).reshape((1, N_Exc))
+            weights_initial_E = (weights_dist_E - weights_dist_E.min()) / (weights_dist_E.max() - weights_dist_E.min()) * 1e-1
+            plt.hist(weights_initial_E.flat)
+            plt.show()
             model.conn_E = nengo.Connection(model.Exc.neurons, model.Output.neurons, 
-                                           transform=np.random.normal(size=N_Exc).reshape((1, N_Exc)) * 5e-2,
-                                           synapse=nengo.Alpha(0.01),
-                                           learning_rule_type=HSP(learning_rate=2e-6))
+                                            transform=weights_initial_E,
+                                            synapse=nengo.Alpha(0.01),
+                                            learning_rule_type=HSP(learning_rate=2e-6))
                              
             return model
 
