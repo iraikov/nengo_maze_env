@@ -10,7 +10,7 @@ seed = 21
 with nengo.Network(seed=seed) as net:
     a = nengo.Ensemble(10, 1)
     b = nengo.Ensemble(1, 1)
-    weights = np.ones((1, 10)) * 1e-3
+    weights = np.ones((1, 10)) * -1e-3
     conn = nengo.Connection(
         a.neurons, b.neurons, transform=weights, learning_rule_type=ISP()
     )

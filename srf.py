@@ -83,14 +83,16 @@ arena_y = np.arange(-arena_extent, arena_extent, arena_res)
 
 arena_xx, arena_yy = np.meshgrid(arena_x, arena_y, indexing='ij')
 peak_rate = 1.
-nmodules = 4
+nmodules_exc = 4
+nmodules_inh = 2
 
-field_width_params = [35.0, 0.32]
-exc_field_width  = lambda x: 40. + field_width_params[0] * (np.exp(x / field_width_params[1]) - 1.)
-inh_field_width  = lambda x: 100. + field_width_params[0] * (np.exp(x / field_width_params[1]) - 1.)
+exc_field_width_params = [35.0, 0.32]
+exc_field_width  = lambda x: 40. + exc_field_width_params[0] * (np.exp(x / exc_field_width_params[1]) - 1.)
+inh_field_width_params = [60.0]
+inh_field_width  = lambda x: 100. + (inh_field_width_params[0] * x)
 
-exc_module_field_width_dict = {i : exc_field_width( float(i) / float(nmodules) ) for i in range(nmodules)}
-inh_module_field_width_dict = {i : inh_field_width( float(i) / float(nmodules) ) for i in range(2)}
+exc_module_field_width_dict = {i : exc_field_width( float(i) / float(nmodules_exc) ) for i in range(nmodules_exc)}
+inh_module_field_width_dict = {i : inh_field_width( float(i) / float(nmodules_inh) ) for i in range(nmodules_inh)}
     
 
 def generate_input_rates(module_field_width_dict, basis_function='gaussian', spacing_factor=1.0, peak_rate=1.):
@@ -103,15 +105,17 @@ def generate_input_rates(module_field_width_dict, basis_function='gaussian', spa
         input_groups_dict[m] = groups
         input_nodes_dict[m] = nodes
         input_rates_dict[m] = {}
-        vertlst = [[v[0], v[1]] for v in vert]
         
         for i in range(nodes.shape[0]):
-            xs = [[nodes[i,0], nodes[i,1]]] + vertlst
+            xs = [[nodes[i,0], nodes[i,1]]]
             x_obs = np.asarray(xs).reshape((1,-1))
             u_obs = np.asarray([[peak_rate]]).reshape((1,-1))
-            input_rate_ip  = Rbf(x_obs[:,0], x_obs[:,1], u_obs,
-                                 function=basis_function, 
-                                 epsilon=module_field_width_dict[m] * spacing_factor)
+            if basis_function == 'constant':
+                input_rate_ip  = lambda xx, yy: xx, yy
+            else:
+                input_rate_ip  = Rbf(x_obs[:,0], x_obs[:,1], u_obs,
+                                    function=basis_function, 
+                                    epsilon=module_field_width_dict[m] * spacing_factor)
             input_rates_dict[m][i] = input_rate_ip
             
     return input_nodes_dict, input_groups_dict, input_rates_dict
@@ -119,7 +123,7 @@ def generate_input_rates(module_field_width_dict, basis_function='gaussian', spa
 exc_input_nodes_dict, exc_input_groups_dict, exc_input_rates_dict = \
     generate_input_rates(exc_module_field_width_dict, spacing_factor=0.8, peak_rate=peak_rate)
 inh_input_nodes_dict, inh_input_groups_dict, inh_input_rates_dict = \
-    generate_input_rates(inh_module_field_width_dict, spacing_factor=1.0, peak_rate=peak_rate)
+    generate_input_rates(inh_module_field_width_dict, basis_function='inverse', spacing_factor=1.4, peak_rate=peak_rate)
 
 def make_input_rate_matrix(input_rates_dict):
 
@@ -135,27 +139,12 @@ def make_input_rate_matrix(input_rates_dict):
 #exc_input_rate_matrix = make_input_rate_matrix(exc_input_rates_dict)
 #inh_input_rate_matrix = make_input_rate_matrix(inh_input_rates_dict)
 
-def plot_input_rates(input_rates_dict):
-    for m in input_rates_dict:
-        plt.figure()
-        arena_map = np.zeros(arena_xx.shape)
-        for i in range(len(input_rates_dict[m])):
-            input_rates = input_rates_dict[m][i](arena_xx, arena_yy)
-            arena_map += input_rates
-        plt.pcolor(arena_xx, arena_yy, arena_map, cmap=cm.jet)
-        ax = plt.gca()
-        ax.set_aspect('equal')
-        plt.show()
-        
-plot_input_rates(exc_input_rates_dict)
-plot_input_rates(inh_input_rates_dict)
-
 
 # In[4]:
 
 
 diag_trajectory = np.asarray([[-100, -100], [100, 100]])
-trj_t, trj_x, trj_y, trj_d = generate_linear_trajectory(diag_trajectory, temporal_resolution=0.001, n_trials=4)
+trj_t, trj_x, trj_y, trj_d = generate_linear_trajectory(diag_trajectory, temporal_resolution=0.001, n_trials=3)
     
 exc_trajectory_input_rates = { m: {} for m in exc_input_rates_dict }
 inh_trajectory_input_rates = { m: {} for m in inh_input_rates_dict }
@@ -179,6 +168,23 @@ for m in inh_input_rates_dict:
         inh_trajectory_inputs.append(input_rates_ip)
             
 
+def plot_input_rates(input_rates_dict):
+    for m in input_rates_dict:
+        plt.figure()
+        arena_map = np.zeros(arena_xx.shape)
+        for i in range(len(input_rates_dict[m])):
+            input_rates = input_rates_dict[m][i](arena_xx, arena_yy)
+            arena_map += input_rates
+        plt.pcolor(arena_xx, arena_yy, arena_map, cmap=cm.jet)
+        #plt.plot(trj_x, trj_y)
+        ax = plt.gca()
+        ax.set_aspect('equal')
+        plt.colorbar()
+        plt.show()
+        
+#plot_input_rates(exc_input_rates_dict)
+plot_input_rates(inh_input_rates_dict)
+
 # In[5]:
 
 
@@ -195,14 +201,14 @@ def trajectory_input(trajectory_inputs, t, centered=False):
 
 # In[ ]:
 
+N_Outputs = 20
+N_Exc = len(exc_trajectory_inputs)
+N_Inh = len(inh_trajectory_inputs)
 
-def make_weber_srf_model():
-        with nengo.Network(label="Weber spatial receptive field model", seed=19) as model:
-
-            rng = np.random.RandomState(seed=19)
+def make_weber_srf_model(seed=19):
+        rng = np.random.RandomState(seed=seed)
+        with nengo.Network(label="Weber spatial receptive field model", seed=seed) as model:
             
-            N_Exc = len(exc_trajectory_inputs)
-            N_Inh = len(inh_trajectory_inputs)
             model.ExcInput = nengo.Node(partial(trajectory_input, exc_trajectory_inputs),
                                         size_out=N_Exc)
             model.InhInput = nengo.Node(partial(trajectory_input, inh_trajectory_inputs),
@@ -218,8 +224,9 @@ def make_weber_srf_model():
                                        intercepts=nengo.dists.Choice([0.1]),
                                        max_rates=nengo.dists.Choice([40]))
             
-            model.Output = nengo.Ensemble(1, dimensions=1,
-                                          neuron_type=nengo.LIFRate(),
+            model.Output = nengo.Ensemble(N_Outputs,
+                                          dimensions=1,
+                                          neuron_type=nengo.LIF(),
                                           intercepts=nengo.dists.Choice([0.1]),
                                           max_rates=nengo.dists.Choice([20]))
 
@@ -229,25 +236,47 @@ def make_weber_srf_model():
                              transform=np.eye(N_Inh))
 
             
-            #model.conn_EI = nengo.Connection(model.Exc.neurons, model.Inh.neurons,
-            #                                 transform=np.ones((N_Inh, N_Exc)) * 1e-6,
-            #                                 synapse=nengo.Alpha(0.01))
-            weights_dist_I =rng.normal(size=N_Inh).reshape((1, N_Inh))
+            weights_dist_I = rng.normal(size=N_Inh*N_Outputs).reshape((N_Outputs, N_Inh))
             weights_initial_I = (weights_dist_I - weights_dist_I.min()) / (weights_dist_I.max() - weights_dist_I.min()) * -1e-2
-            plt.hist(weights_initial_I.flat)
-            plt.show()
-            model.conn_I = nengo.Connection(model.Inh.neurons, model.Output.neurons,
+            model.conn_I = nengo.Connection(model.Inh.neurons,
+                                            model.Output.neurons,
                                             transform=weights_initial_I,
-                                            synapse=nengo.Alpha(0.01), 
-                                            learning_rule_type=ISP(learning_rate=4e-6, rho0=1.))
-            weights_dist_E = rng.normal(size=N_Exc).reshape((1, N_Exc))
+                                            synapse=nengo.Alpha(0.03), 
+                                            learning_rule_type=ISP(learning_rate=1e-6, rho0=2.0))
+            weights_dist_E = rng.normal(size=N_Exc*N_Outputs).reshape((N_Outputs, N_Exc))
+            for i in range(N_Outputs):
+                sources_Exc = np.asarray(rng.choice(N_Exc, round(0.3 * N_Exc), replace=False), dtype=np.int32)
+                weights_dist_E[i,np.setdiff1d(sources_Exc, range(N_Exc))] = 0.
             weights_initial_E = (weights_dist_E - weights_dist_E.min()) / (weights_dist_E.max() - weights_dist_E.min()) * 1e-1
-            plt.hist(weights_initial_E.flat)
-            plt.show()
-            model.conn_E = nengo.Connection(model.Exc.neurons, model.Output.neurons, 
+            model.conn_E = nengo.Connection(model.Exc.neurons,
+                                            model.Output.neurons, 
                                             transform=weights_initial_E,
                                             synapse=nengo.Alpha(0.01),
                                             learning_rule_type=HSP(learning_rate=2e-6))
+                
+            weights_dist_EI = rng.normal(size=N_Outputs*N_Inh).reshape((N_Inh, N_Outputs))
+            for i in range(N_Outputs):
+                targets_Inh = np.asarray(rng.choice(N_Inh, round(0.4 * N_Inh), replace=False), dtype=np.int32)
+                weights_dist_EI[i,np.setdiff1d(targets_Inh, range(N_Inh))] = 0.
+            weights_initial_EI = (weights_dist_EI - weights_dist_EI.min()) / (weights_dist_EI.max() - weights_dist_EI.min()) * 1e-3
+            model.conn_EI = nengo.Connection(model.Output.neurons,
+                                             model.Inh.neurons,
+                                             transform=weights_initial_EI,
+                                             synapse=nengo.Alpha(0.01))
+            plt.hist(weights_initial_I.flat)
+            plt.show()
+            plt.hist(weights_initial_E.flat)
+            plt.show()
+                    
+            #targets_Out = np.asarray(rng.choice(N_Exc, round(0.1 * N_Output), replace=False), dtype=np.int32)
+            #weights_dist_EI = rng.normal(size=N_Inh).reshape((N_Inh, 1))
+            #weights_dist_EI[0,np.setdiff1d(targets_Inh, range(N_Inh))] = 0.
+            #weights_initial_EI = (weights_dist_EI - weights_dist_EI.min()) / (weights_dist_EI.max() - weights_dist_EI.min()) * 1e-3
+            #model.conn_EE = nengo.Connection(model.Output[i].neurons, 
+            #                                 model.Output[i+1].neurons, 
+            #                                 transform=np.ones((1,1)) * 1e-3,
+            #                                 synapse=nengo.Alpha(0.01),
+            #                                 learning_rule_type=HSP(learning_rate=1e-6))
                              
             return model
 
@@ -255,17 +284,20 @@ def make_weber_srf_model():
 srf_model = make_weber_srf_model()
 
 with srf_model:
-    p_output_rates = nengo.Probe(srf_model.Output.neurons, 'rates')
+    p_output_spikes = nengo.Probe(srf_model.Output.neurons, 'spikes', synapse=0.05)
+    #p_output_rates = nengo.Probe(srf_model.Output.neurons, 'rates', synapse=0.05)
     p_inh_rates = nengo.Probe(srf_model.Inh.neurons, 'rates')
     p_inh_weights = nengo.Probe(srf_model.conn_I, 'weights')
     p_exc_rates = nengo.Probe(srf_model.Exc.neurons, 'rates')
     p_exc_weights = nengo.Probe(srf_model.conn_E, 'weights')
         
-with nengo.Simulator(srf_model) as sim:
+with nengo.Simulator(srf_model, optimize=True) as sim:
     sim.run(np.max(trj_t))
     
+output_spikes = sim.data[p_output_spikes]
 #plot_spikes(sim.trange(), sim.data[p_inh_rates][0,:])
-
-
+np.save("srf_output_spikes", np.asarray(output_spikes, dtype=np.float32))
+#output_rates = sim.data[p_output_rates]
+#np.save("srf_output_rates", np.asarray(output_rates, dtype=np.float32))
 
 

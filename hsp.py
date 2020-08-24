@@ -97,6 +97,8 @@ class SimHSP(Operator):
         self.incs = []
         self.reads = [pre_filtered, post_filtered, weights]
         self.updates = [delta]
+        self.mask = np.logical_not(np.isclose(weights.initial_value, 0.))
+
 
     @property
     def delta(self):
@@ -129,10 +131,19 @@ class SimHSP(Operator):
         delta = signals[self.delta]
         kappa = self.learning_rate * dt
         weights = signals[self.weights]
+        mask = self.mask
 
         def step_simhsp():
-            factor = 1.0 - (np.dot(weights, weights.T) / np.linalg.norm(weights))
-            delta[...] = kappa * factor * pre_filtered * post_filtered
+            ## This code below is an optimized version of:
+            #for i in range(weights.shape[0]):
+            #    factor = 1.0 - (np.dot(weights[i,:], weights[i,:].T) / np.linalg.norm(weights[i,:]))
+            #    delta[i,:] = kappa * factor * pre_filtered * self.mask[i,:] * post_filtered[i]
+
+            factor = 1.0 - (np.einsum('ij,ji->i',weights, weights.T) / np.linalg.norm(weights,axis=1))
+            a = kappa * factor * post_filtered
+            np.multiply(self.mask, pre_filtered, out=delta)
+            np.multiply(a[:, np.newaxis], delta, out=delta)
+            
         return step_simhsp
 
     
@@ -156,8 +167,12 @@ def build_hsp(model, hsp, rule):
     """
 
     conn = rule.connection
-    pre_activities = model.sig[get_pre_ens(conn).neurons]["out"]
+    pre_activities = model.sig[conn.pre_obj]["out"]
+    if conn.pre_slice is not None:
+        pre_activities = pre_activities[conn.pre_slice]
     post_activities = model.sig[get_post_ens(conn).neurons]["out"]
+    if conn.post_slice is not None:
+        post_activities = post_activities[conn.post_slice]
     pre_filtered = build_or_passthrough(model, hsp.pre_synapse, pre_activities)
     post_filtered = build_or_passthrough(model, hsp.post_synapse, post_activities)
     weights = model.sig[conn]["weights"]

@@ -103,7 +103,7 @@ class SimISP(Operator):
         super(SimISP, self).__init__(tag=tag)
         self.learning_rate = learning_rate
         self.rho0 = rho0
-        
+        self.mask = np.logical_not(np.isclose(weights.initial_value, 0.))
         self.sets = []
         self.incs = []
         self.reads = [pre_filtered, post_filtered, weights]
@@ -141,12 +141,21 @@ class SimISP(Operator):
         delta = signals[self.delta]
         kappa = self.learning_rate * dt
         rho0 = self.rho0
-
+        mask = self.mask
+        
         def step_simisp():
-            delta[...] = -kappa * pre_filtered * (post_filtered - rho0)
+            ## The code below is an optimized version of the following:
+            #for i in range(weights.shape[0]):
+            #    delta[i,:] = -kappa * pre_filtered * mask[i,:] * (post_filtered[i] - rho0)
+            #    delta_sum = np.add(delta[i,:], weights[i,:])
+
+            a = -kappa * (post_filtered - rho0)
+            np.multiply(self.mask, pre_filtered, out=delta)
+            np.multiply(a[:, np.newaxis], delta, out=delta)
             delta_sum = np.add(delta, weights)
-            pos = np.argwhere(np.logical_or(delta_sum.flat >= 0, delta_sum.flat < -1)).flat
-            delta[:,pos] = 0.
+            pos = np.nonzero(np.logical_or(delta_sum >= 0, delta_sum < -1))
+            delta[pos] = 0.
+            
         return step_simisp
 
     
@@ -170,12 +179,16 @@ def build_isp(model, isp, rule):
     """
 
     conn = rule.connection
-    pre_activities = model.sig[get_pre_ens(conn).neurons]["out"]
+    pre_activities = model.sig[conn.pre_obj]["out"]
+    if conn.pre_slice is not None:
+        pre_activities = pre_activities[conn.pre_slice]
     post_activities = model.sig[get_post_ens(conn).neurons]["out"]
+    if conn.post_slice is not None:
+        post_activities = post_activities[conn.post_slice]
     pre_filtered = build_or_passthrough(model, isp.pre_synapse, pre_activities)
     post_filtered = build_or_passthrough(model, isp.post_synapse, post_activities)
     weights = model.sig[conn]["weights"]
-    
+                
     model.add_op(
         SimISP(
             pre_filtered,
