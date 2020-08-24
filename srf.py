@@ -244,10 +244,12 @@ def make_weber_srf_model(seed=19):
                                             synapse=nengo.Alpha(0.03), 
                                             learning_rule_type=ISP(learning_rate=1e-6, rho0=2.0))
             weights_dist_E = rng.normal(size=N_Exc*N_Outputs).reshape((N_Outputs, N_Exc))
-            for i in range(N_Outputs):
-                sources_Exc = np.asarray(rng.choice(N_Exc, round(0.3 * N_Exc), replace=False), dtype=np.int32)
-                weights_dist_E[i,np.setdiff1d(sources_Exc, range(N_Exc))] = 0.
             weights_initial_E = (weights_dist_E - weights_dist_E.min()) / (weights_dist_E.max() - weights_dist_E.min()) * 1e-1
+            for i in range(N_Outputs):
+                sources_Exc = np.asarray(rng.choice(N_Exc, round(0.4 * N_Exc), replace=False), dtype=np.int32)
+                weights_initial_E[i,np.logical_not(np.in1d(range(N_Exc), sources_Exc))] = 0.
+                
+            print('norm weights_initial_E: %s' % str(np.linalg.norm(weights_initial_E, axis=1)))
             model.conn_E = nengo.Connection(model.Exc.neurons,
                                             model.Output.neurons, 
                                             transform=weights_initial_E,
@@ -255,10 +257,10 @@ def make_weber_srf_model(seed=19):
                                             learning_rule_type=HSP(learning_rate=2e-6))
                 
             weights_dist_EI = rng.normal(size=N_Outputs*N_Inh).reshape((N_Inh, N_Outputs))
+            weights_initial_EI = (weights_dist_EI - weights_dist_EI.min()) / (weights_dist_EI.max() - weights_dist_EI.min()) * 1e-3
             for i in range(N_Outputs):
                 targets_Inh = np.asarray(rng.choice(N_Inh, round(0.4 * N_Inh), replace=False), dtype=np.int32)
-                weights_dist_EI[i,np.setdiff1d(targets_Inh, range(N_Inh))] = 0.
-            weights_initial_EI = (weights_dist_EI - weights_dist_EI.min()) / (weights_dist_EI.max() - weights_dist_EI.min()) * 1e-3
+                weights_initial_EI[np.logical_not(np.in1d(range(N_Inh), targets_Inh)), i] = 0.
             model.conn_EI = nengo.Connection(model.Output.neurons,
                                              model.Inh.neurons,
                                              transform=weights_initial_EI,
@@ -268,15 +270,17 @@ def make_weber_srf_model(seed=19):
             plt.hist(weights_initial_E.flat)
             plt.show()
                     
-            #targets_Out = np.asarray(rng.choice(N_Exc, round(0.1 * N_Output), replace=False), dtype=np.int32)
-            #weights_dist_EI = rng.normal(size=N_Inh).reshape((N_Inh, 1))
-            #weights_dist_EI[0,np.setdiff1d(targets_Inh, range(N_Inh))] = 0.
-            #weights_initial_EI = (weights_dist_EI - weights_dist_EI.min()) / (weights_dist_EI.max() - weights_dist_EI.min()) * 1e-3
-            #model.conn_EE = nengo.Connection(model.Output[i].neurons, 
-            #                                 model.Output[i+1].neurons, 
-            #                                 transform=np.ones((1,1)) * 1e-3,
-            #                                 synapse=nengo.Alpha(0.01),
-            #                                 learning_rule_type=HSP(learning_rate=1e-6))
+            weights_dist_EE = rng.normal(size=N_Outputs*N_Outputs).reshape((N_Outputs, N_Outputs))
+            weights_initial_EE = (weights_dist_EE - weights_dist_EE.min()) / (weights_dist_EE.max() - weights_dist_EE.min()) * 1e-4
+            for i in range(N_Outputs):
+                targets_Out = np.asarray(rng.choice(N_Outputs, 1, replace=False), dtype=np.int32)
+                weights_initial_EE[i, np.logical_not(np.in1d(range(N_Outputs), targets_Out))] = 0.
+            print('norm weights_initial_EE: %s' % str(np.linalg.norm(weights_initial_EE, axis=1)))
+            model.conn_EE = nengo.Connection(model.Output.neurons, 
+                                             model.Output.neurons, 
+                                             transform=weights_initial_EE,
+                                             synapse=nengo.Alpha(0.01),
+                                             learning_rule_type=HSP(learning_rate=1e-6))
                              
             return model
 
