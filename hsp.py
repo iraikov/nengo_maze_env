@@ -144,6 +144,14 @@ class SimHSP(Operator):
             a = kappa * factor * post_filtered
             np.multiply(self.mask, pre_filtered, out=delta)
             np.multiply(a[:, np.newaxis], delta, out=delta)
+            sgn = np.row_stack([np.asarray([-1 if pre_filtered[j] < post_filtered[i] else 1
+                                            for j in range(weights.shape[1])])
+                                for i in range(weights.shape[0])])
+            np.multiply(sgn, delta, out=delta)
+            delta_sum = np.add(delta, weights)
+            negz = np.nonzero(delta_sum <= 1e-6)
+            delta[negz] = 0.
+
             
         return step_simhsp
 

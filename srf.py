@@ -201,7 +201,7 @@ def trajectory_input(trajectory_inputs, t, centered=False):
 
 # In[ ]:
 
-N_Outputs = 20
+N_Outputs = 50
 N_Exc = len(exc_trajectory_inputs)
 N_Inh = len(inh_trajectory_inputs)
 
@@ -241,20 +241,19 @@ def make_weber_srf_model(seed=19):
             model.conn_I = nengo.Connection(model.Inh.neurons,
                                             model.Output.neurons,
                                             transform=weights_initial_I,
-                                            synapse=nengo.Alpha(0.03), 
+                                            synapse=nengo.Alpha(0.03),
                                             learning_rule_type=ISP(learning_rate=1e-6, rho0=2.0))
             weights_dist_E = rng.normal(size=N_Exc*N_Outputs).reshape((N_Outputs, N_Exc))
             weights_initial_E = (weights_dist_E - weights_dist_E.min()) / (weights_dist_E.max() - weights_dist_E.min()) * 1e-1
             for i in range(N_Outputs):
                 sources_Exc = np.asarray(rng.choice(N_Exc, round(0.4 * N_Exc), replace=False), dtype=np.int32)
-                weights_initial_E[i,np.logical_not(np.in1d(range(N_Exc), sources_Exc))] = 0.
+                weights_initial_E[i, np.logical_not(np.in1d(range(N_Exc), sources_Exc))] = 0.
                 
-            print('norm weights_initial_E: %s' % str(np.linalg.norm(weights_initial_E, axis=1)))
             model.conn_E = nengo.Connection(model.Exc.neurons,
                                             model.Output.neurons, 
                                             transform=weights_initial_E,
                                             synapse=nengo.Alpha(0.01),
-                                            learning_rule_type=HSP(learning_rate=2e-6))
+                                            learning_rule_type=HSP(learning_rate=1e-5))
                 
             weights_dist_EI = rng.normal(size=N_Outputs*N_Inh).reshape((N_Inh, N_Outputs))
             weights_initial_EI = (weights_dist_EI - weights_dist_EI.min()) / (weights_dist_EI.max() - weights_dist_EI.min()) * 1e-3
@@ -273,14 +272,15 @@ def make_weber_srf_model(seed=19):
             weights_dist_EE = rng.normal(size=N_Outputs*N_Outputs).reshape((N_Outputs, N_Outputs))
             weights_initial_EE = (weights_dist_EE - weights_dist_EE.min()) / (weights_dist_EE.max() - weights_dist_EE.min()) * 1e-4
             for i in range(N_Outputs):
-                targets_Out = np.asarray(rng.choice(N_Outputs, 1, replace=False), dtype=np.int32)
+                target_choices = np.asarray([ j for j in range(N_Outputs) if i != j ])
+                targets_Out = np.asarray(rng.choice(target_choices, round(0.1 * N_Outputs), replace=False),
+                                         dtype=np.int32)
                 weights_initial_EE[i, np.logical_not(np.in1d(range(N_Outputs), targets_Out))] = 0.
-            print('norm weights_initial_EE: %s' % str(np.linalg.norm(weights_initial_EE, axis=1)))
             model.conn_EE = nengo.Connection(model.Output.neurons, 
                                              model.Output.neurons, 
                                              transform=weights_initial_EE,
                                              synapse=nengo.Alpha(0.01),
-                                             learning_rule_type=HSP(learning_rate=1e-6))
+                                             learning_rule_type=HSP(learning_rate=1e-5))
                              
             return model
 
@@ -294,6 +294,7 @@ with srf_model:
     p_inh_weights = nengo.Probe(srf_model.conn_I, 'weights')
     p_exc_rates = nengo.Probe(srf_model.Exc.neurons, 'rates')
     p_exc_weights = nengo.Probe(srf_model.conn_E, 'weights')
+    p_rec_weights = nengo.Probe(srf_model.conn_EE, 'weights')
         
 with nengo.Simulator(srf_model, optimize=True) as sim:
     sim.run(np.max(trj_t))
