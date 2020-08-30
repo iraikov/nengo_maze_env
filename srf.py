@@ -4,19 +4,15 @@ from functools import partial
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
-import nengo
-
-import numpy as np
 import scipy.interpolate
 from scipy.interpolate import Rbf, CubicSpline
 from rbf.pde.nodes import disperse, poisson_disc_nodes
-from hsp import HSP
-from isp import ISP
-
+import nengo
 from nengo_extras.plot_spikes import (
     cluster, merge, plot_spikes, preprocess_spikes, sample_by_variance, sample_by_activity)
 from nengo_extras.neurons import (
-    rates_kernel, rates_isi )
+    NumbaLIF, rates_kernel, rates_isi )
+from prf_net import PRF
 
 # In[2]:
 
@@ -182,7 +178,7 @@ def plot_input_rates(input_rates_dict):
         plt.colorbar()
         plt.show()
         
-#plot_input_rates(exc_input_rates_dict)
+plot_input_rates(exc_input_rates_dict)
 plot_input_rates(inh_input_rates_dict)
 
 # In[5]:
@@ -205,104 +201,33 @@ N_Outputs = 50
 N_Exc = len(exc_trajectory_inputs)
 N_Inh = len(inh_trajectory_inputs)
 
-def make_weber_srf_model(seed=19):
-        rng = np.random.RandomState(seed=seed)
-        with nengo.Network(label="Weber spatial receptive field model", seed=seed) as model:
-            
-            model.ExcInput = nengo.Node(partial(trajectory_input, exc_trajectory_inputs),
-                                        size_out=N_Exc)
-            model.InhInput = nengo.Node(partial(trajectory_input, inh_trajectory_inputs),
-                                        size_out=N_Inh)
-                                         
-            model.Exc = nengo.Ensemble(N_Exc, dimensions=1,
-                                       neuron_type=nengo.RectifiedLinear(),
-                                       intercepts=nengo.dists.Choice([0.1]),
-                                       max_rates=nengo.dists.Choice([20]))
-            
-            model.Inh = nengo.Ensemble(N_Inh, dimensions=1,
-                                       neuron_type=nengo.RectifiedLinear(),
-                                       intercepts=nengo.dists.Choice([0.1]),
-                                       max_rates=nengo.dists.Choice([40]))
-            
-            model.Output = nengo.Ensemble(N_Outputs,
-                                          dimensions=1,
-                                          neuron_type=nengo.LIF(),
-                                          intercepts=nengo.dists.Choice([0.1]),
-                                          max_rates=nengo.dists.Choice([20]))
+def make_srf_network(seed=19):
+    rng = np.random.RandomState(seed=seed)
+    srf = PRF(exc_input = partial(trajectory_input, exc_trajectory_inputs),
+              inh_input = partial(trajectory_input, inh_trajectory_inputs),
+              n_excitatory = N_Exc,
+              n_inhibitory = N_Inh,
+              n_outputs = N_Outputs,
+              label="Spatial receptive field network",
+              seed=seed)
+    srf.out_ens_config[nengo.Ensemble].update({"neuron_type": NumbaLIF()})
+    return srf
+    
+srf_network = make_srf_network()
 
-            nengo.Connection(model.ExcInput, model.Exc.neurons, synapse=nengo.Lowpass(0.01),
-                             transform=np.eye(N_Exc))
-            nengo.Connection(model.InhInput, model.Inh.neurons, synapse=nengo.Lowpass(0.01),
-                             transform=np.eye(N_Inh))
-
-            
-            weights_dist_I = rng.normal(size=N_Inh*N_Outputs).reshape((N_Outputs, N_Inh))
-            weights_initial_I = (weights_dist_I - weights_dist_I.min()) / (weights_dist_I.max() - weights_dist_I.min()) * -1e-2
-            model.conn_I = nengo.Connection(model.Inh.neurons,
-                                            model.Output.neurons,
-                                            transform=weights_initial_I,
-                                            synapse=nengo.Alpha(0.03),
-                                            learning_rule_type=ISP(learning_rate=1e-6, rho0=2.0))
-            weights_dist_E = rng.normal(size=N_Exc*N_Outputs).reshape((N_Outputs, N_Exc))
-            weights_initial_E = (weights_dist_E - weights_dist_E.min()) / (weights_dist_E.max() - weights_dist_E.min()) * 1e-1
-            for i in range(N_Outputs):
-                sources_Exc = np.asarray(rng.choice(N_Exc, round(0.4 * N_Exc), replace=False), dtype=np.int32)
-                weights_initial_E[i, np.logical_not(np.in1d(range(N_Exc), sources_Exc))] = 0.
-                
-            model.conn_E = nengo.Connection(model.Exc.neurons,
-                                            model.Output.neurons, 
-                                            transform=weights_initial_E,
-                                            synapse=nengo.Alpha(0.01),
-                                            learning_rule_type=HSP(learning_rate=1e-5))
-                
-            weights_dist_EI = rng.normal(size=N_Outputs*N_Inh).reshape((N_Inh, N_Outputs))
-            weights_initial_EI = (weights_dist_EI - weights_dist_EI.min()) / (weights_dist_EI.max() - weights_dist_EI.min()) * 1e-3
-            for i in range(N_Outputs):
-                targets_Inh = np.asarray(rng.choice(N_Inh, round(0.4 * N_Inh), replace=False), dtype=np.int32)
-                weights_initial_EI[np.logical_not(np.in1d(range(N_Inh), targets_Inh)), i] = 0.
-            model.conn_EI = nengo.Connection(model.Output.neurons,
-                                             model.Inh.neurons,
-                                             transform=weights_initial_EI,
-                                             synapse=nengo.Alpha(0.01))
-            plt.hist(weights_initial_I.flat)
-            plt.show()
-            plt.hist(weights_initial_E.flat)
-            plt.show()
-                    
-            weights_dist_EE = rng.normal(size=N_Outputs*N_Outputs).reshape((N_Outputs, N_Outputs))
-            weights_initial_EE = (weights_dist_EE - weights_dist_EE.min()) / (weights_dist_EE.max() - weights_dist_EE.min()) * 1e-4
-            for i in range(N_Outputs):
-                target_choices = np.asarray([ j for j in range(N_Outputs) if i != j ])
-                targets_Out = np.asarray(rng.choice(target_choices, round(0.1 * N_Outputs), replace=False),
-                                         dtype=np.int32)
-                weights_initial_EE[i, np.logical_not(np.in1d(range(N_Outputs), targets_Out))] = 0.
-            model.conn_EE = nengo.Connection(model.Output.neurons, 
-                                             model.Output.neurons, 
-                                             transform=weights_initial_EE,
-                                             synapse=nengo.Alpha(0.01),
-                                             learning_rule_type=HSP(learning_rate=1e-5))
-                             
-            return model
-
-      
-srf_model = make_weber_srf_model()
-
-with srf_model:
-    p_output_spikes = nengo.Probe(srf_model.Output.neurons, 'spikes', synapse=0.05)
-    #p_output_rates = nengo.Probe(srf_model.Output.neurons, 'rates', synapse=0.05)
-    p_inh_rates = nengo.Probe(srf_model.Inh.neurons, 'rates')
-    p_inh_weights = nengo.Probe(srf_model.conn_I, 'weights')
-    p_exc_rates = nengo.Probe(srf_model.Exc.neurons, 'rates')
-    p_exc_weights = nengo.Probe(srf_model.conn_E, 'weights')
-    p_rec_weights = nengo.Probe(srf_model.conn_EE, 'weights')
+with srf_network:
+    p_output_spikes = nengo.Probe(srf_network.output.neurons, 'spikes', synapse=0.05)
+    p_inh_weights = nengo.Probe(srf_network.conn_I, 'weights')
+    p_exc_weights = nengo.Probe(srf_network.conn_E, 'weights')
+    p_rec_weights = nengo.Probe(srf_network.conn_EE, 'weights')
         
-with nengo.Simulator(srf_model, optimize=True) as sim:
+with nengo.Simulator(srf_network, optimize=True) as sim:
     sim.run(np.max(trj_t))
     
 output_spikes = sim.data[p_output_spikes]
-#plot_spikes(sim.trange(), sim.data[p_inh_rates][0,:])
 np.save("srf_output_spikes", np.asarray(output_spikes, dtype=np.float32))
 #output_rates = sim.data[p_output_rates]
-#np.save("srf_output_rates", np.asarray(output_rates, dtype=np.float32))
+#plot_spikes(sim.trange(), sim.data[p_inh_rates][0,:])
+
 
 
