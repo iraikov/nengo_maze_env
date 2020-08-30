@@ -226,6 +226,8 @@ with nengo.Simulator(srf_network, optimize=True) as sim:
     
 output_spikes = sim.data[p_output_spikes]
 np.save("srf_output_spikes", np.asarray(output_spikes, dtype=np.float32))
+np.save("srf_time_range", np.asarray(sim.trange(), dtype=np.float32))
+output_rates = rates_kernel(sim.trange(), output_spikes, tau=0.1)
 #output_rates = sim.data[p_output_rates]
 #plot_spikes(sim.trange(), sim.data[p_inh_rates][0,:])
 

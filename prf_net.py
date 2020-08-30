@@ -19,17 +19,18 @@ class PRF(nengo.Network):
                  w_initial_I = -1e-2, # baseline inhibitory synaptic weight
                  w_initial_E =  1e-1, # baseline excitatory synaptic weight
                  w_initial_EI =  1e-3, # baseline feedback inhibition synaptic weight
-                 w_initial_EE =  1e-4, # baseline recurrent excitatory synaptic weight
+                 w_initial_EE =  1e-3, # baseline recurrent excitatory synaptic weight
                  p_E = 0.4, # uniform probability of connection of excitatory inputs to outputs
                  p_EI = 0.4, # uniform probability of feedback connections to inhibitory cells
                  p_EE = 0.1, # uniform probability of recurrent connections
                  tau_I = 0.03, # filter for inhibitory inputs
                  tau_E = 0.01, # filter for excitatory inputs
                  tau_EI = 0.01, # filter for feedback inhibitory connections
-                 tau_EE = 0.05, # filter for recurrent connections
+                 tau_EE = 0.01, # filter for recurrent connections
                  learning_rate_I = 1e-6, # learning rate for homeostatic inhibitory plasticity
                  learning_rate_E = 1e-5, # learning rate for associative excitatory plasticity
-                 learning_rate_EE = 1e-6, # learning rate for recurrent excitatory plasticity
+                 learning_rate_EE = 1e-5, # learning rate for recurrent excitatory plasticity
+                 isp_target_rate = 2.0, # target firing rate for inhibitory plasticity
                  label = None,
                  seed = 0,
                  add_to_container = None,
@@ -101,7 +102,8 @@ class PRF(nengo.Network):
                                            self.output.neurons,
                                            transform=weights_initial_I,
                                            synapse=nengo.Alpha(tau_I),
-                                           learning_rule_type=ISP(learning_rate=learning_rate_I, rho0=2.0))
+                                           learning_rule_type=ISP(learning_rate=learning_rate_I,
+                                                                  rho0=isp_target_rate))
             
             self.conn_E = nengo.Connection(self.exc.neurons,
                                            self.output.neurons, 
