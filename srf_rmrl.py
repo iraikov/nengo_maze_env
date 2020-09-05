@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
 import scipy.interpolate
-from scipy.interpolate import Rbf, CubicSpline
+from scipy.interpolate import Rbf, CubicSpline, CubicHermiteSpline
 from rbf.pde.nodes import disperse, poisson_disc_nodes
 import nengo
 from nengo_extras.plot_spikes import (
@@ -13,8 +13,13 @@ from nengo_extras.plot_spikes import (
 from nengo_extras.neurons import (
     NumbaLIF, rates_kernel, rates_isi )
 from prf_net import PRF
+from hsp import HSP
 
-# In[2]:
+def consecutive(data):
+    """
+    Returns a list of arrays with consecutive values from data.
+    """
+    return np.split(data, np.where(np.diff(data) != 1)[0]+1)
 
 
 def generate_linear_trajectory(input_trajectory, temporal_resolution=1., velocity=30., reward_pos=None, reward_delay=0.5, equilibration_duration=None, n_trials=1):
@@ -55,16 +60,19 @@ def generate_linear_trajectory(input_trajectory, temporal_resolution=1., velocit
     interp_distance = np.arange(distance.min(), distance.max() + spatial_resolution / 2., spatial_resolution)
     interp_x = np.interp(interp_distance, distance, x)
     interp_y = np.interp(interp_distance, distance, y)
+
     t = interp_distance / velocity  # s
 
     if reward_pos is not None:
-        interp_reward_x = np.interp(interp_distance, distance, reward_pos[0])
-        interp_reward_y = np.interp(interp_distance, distance, reward_pos[1])
-        reward_locs = np.argwhere(np.logical_and(np.isclose(interp_x, interp_reward_x, atol=1e-3, rtol=1e-3),
-                                                 np.isclose(interp_y, interp_reward_y, atol=1e-3, rtol=1e-3)))
-        for loc in reward_locs:
+        reward_x = reward_pos[0]
+        reward_y = reward_pos[1]
+        reward_locs = np.argwhere(np.logical_and(np.isclose(interp_x, reward_x, atol=1e-2, rtol=1e-2),
+                                                 np.isclose(interp_y, reward_y, atol=1e-2, rtol=1e-2)))
+        reward_loc_ranges = consecutive(reward_locs.flat)
+        for loc_array in reward_loc_ranges[:-1]:
+            loc = loc_array[0]
             t[loc:] += reward_delay
-    
+
     t = np.subtract(t, equilibration_duration)
     interp_distance -= equilibration_distance
     
@@ -87,6 +95,7 @@ arena_y = np.arange(-arena_extent, arena_extent, arena_res)
 
 arena_xx, arena_yy = np.meshgrid(arena_x, arena_y, indexing='ij')
 peak_rate = 1.
+reward_peak_rate = 5.
 nmodules_exc = 4
 nmodules_inh = 2
 
@@ -146,11 +155,10 @@ def make_input_rate_matrix(input_rates_dict):
 
 # In[4]:
 
-reward_pos = [100., 100.]
+reward_pos = [0., 0.]
 diag_trajectory = np.asarray([[-100, -100], [100, 100]])
 trj_t, trj_x, trj_y, trj_d = generate_linear_trajectory(diag_trajectory, temporal_resolution=0.001,
-                                                        reward_pos=reward_pos, n_trials=3)
-    
+                                                        reward_pos=reward_pos, n_trials=2)
 exc_trajectory_input_rates = { m: {} for m in exc_input_rates_dict }
 inh_trajectory_input_rates = { m: {} for m in inh_input_rates_dict }
 exc_trajectory_inputs = []
@@ -172,12 +180,16 @@ for m in inh_input_rates_dict:
         input_rates_ip = CubicSpline(trj_t, input_rates)
         inh_trajectory_inputs.append(input_rates_ip)
 
-reward_idxs = np.argwhere(np.logical_and(np.isclose(trj_x, reward_pos[0], atol=1., rtol=1.),
-                                         np.isclose(trj_y, reward_pos[1], atol=1., rtol=1.)))
-reward_input_rates = np.zeros(trj_t.shape, dtype=np.float32)
-reward_input_rates[reward_idxs] = 20.0
-reward_input_rates = [CubicSpline(trj_t, reward_input_rates)]
-
+reward_idxs = np.argwhere(np.logical_and(np.isclose(trj_x, reward_pos[0], atol=1e-1, rtol=1e-1),
+                                         np.isclose(trj_y, reward_pos[1], atol=1e-1, rtol=1e-1)))
+reward_loc_ranges = consecutive(reward_idxs.flat)[:-1]
+reward_input_rates = np.zeros((trj_t.shape[0], 1))
+for reward_loc_idxs in reward_loc_ranges:
+    reward_input_rates[reward_loc_idxs,0] = reward_peak_rate
+reward_input_rates = rates_kernel(trj_t, reward_input_rates, tau=0.2)    
+reward_input_rates_ip = [CubicSpline(trj_t, reward_input_rates)]
+plt.plot(trj_t, reward_input_rates_ip[0](trj_t))
+plt.show()
         
 def plot_input_rates(input_rates_dict):
     for m in input_rates_dict:
@@ -193,12 +205,12 @@ def plot_input_rates(input_rates_dict):
         plt.colorbar()
         plt.show()
         
-plot_input_rates(exc_input_rates_dict)
-plot_input_rates(inh_input_rates_dict)
+#plot_input_rates(exc_input_rates_dict)
+#plot_input_rates(inh_input_rates_dict)
 
-N_Outputs = 50
-N_Exc = len(exc_trajectory_inputs)
-N_Inh = len(inh_trajectory_inputs)
+n_outputs = 50
+n_excitatory = len(exc_trajectory_inputs)
+n_inhibitory = len(inh_trajectory_inputs)
 
 def trajectory_input(trajectory_inputs, t, centered=False):
     if centered:
@@ -207,72 +219,125 @@ def trajectory_input(trajectory_inputs, t, centered=False):
         result = np.asarray([ y(t) for y in trajectory_inputs ])
     return result
 
+seed = 21
 
 srf_rmrl_network = nengo.Network(label="Reward-modulated replay learning with spatial receptive fields", seed=seed)
 
 with srf_rmrl_network as model:
-    
-    place_network = PRF(exc_input = partial(trajectory_input, exc_trajectory_inputs),
-                        inh_input = partial(trajectory_input, inh_trajectory_inputs),
-                        n_excitatory = N_Exc,
-                        n_inhibitory = N_Inh,
-                        n_outputs = N_Outputs,
+
+    rng = np.random.RandomState(seed=seed)
+
+    place_network = PRF(exc_input_func = partial(trajectory_input, exc_trajectory_inputs),
+                        inh_input_func = partial(trajectory_input, inh_trajectory_inputs),
+                        n_excitatory = n_excitatory,
+                        n_inhibitory = n_inhibitory,
+                        n_outputs = n_outputs,
                         label="Spatial receptive field network",
                         seed=seed)
 
-    value_network = PRF(n_excitatory = N_Exc,
-                        n_inhibitory = N_Inh,
-                        n_outputs = N_Outputs,
+    value_network = PRF(n_excitatory = n_excitatory,
+                        n_inhibitory = n_inhibitory,
+                        n_outputs = n_outputs,
+                        p_EE = 0.02,
                         label="Value network",
                         seed=seed)
+
+    weights_dist_PV_E = rng.normal(size=n_outputs*n_excitatory).reshape((n_excitatory, n_outputs))
+    weights_initial_PV_E = (weights_dist_PV_E - weights_dist_PV_E.min()) / (weights_dist_PV_E.max() - weights_dist_PV_E.min()) * 1e-2
+    for i in range(n_excitatory):
+        sources = np.asarray(rng.choice(n_outputs, round(0.1 * n_outputs), replace=False), dtype=np.int32)
+        weights_initial_PV_E[i, np.logical_not(np.in1d(range(n_outputs), sources))] = 0.
+
+    plt.imshow(weights_initial_PV_E.T,  aspect='auto')
+    plt.show()
+
+    conn_PV_E = nengo.Connection(place_network.output.neurons,
+                                 value_network.exc.neurons,
+                                 transform=weights_initial_PV_E,
+                                 synapse=nengo.Alpha(0.03),
+                                 learning_rule_type=HSP(learning_rate=1e-4))
+
+    weights_dist_PV_I = rng.uniform(size=n_inhibitory*n_outputs).reshape((n_inhibitory, n_outputs))
+    weights_initial_PV_I = (weights_dist_PV_I - weights_dist_PV_I.min()) / (weights_dist_PV_I.max() - weights_dist_PV_I.min()) * 1e-2
+    for i in range(n_inhibitory):
+        sources = np.asarray(rng.choice(n_outputs, round(0.2 * n_outputs), replace=False), dtype=np.int32)
+        weights_initial_PV_I[i, np.logical_not(np.in1d(range(n_outputs), sources))] = 0.
+
+    plt.imshow(weights_initial_PV_I.T,  aspect='auto')
+    plt.show()
+
+    conn_PV_I = nengo.Connection(place_network.output.neurons,
+                                 value_network.inh.neurons,
+                                 transform=weights_initial_PV_I,
+                                 synapse=nengo.Alpha(0.03))
+
+    reward_input = nengo.Node(output=partial(trajectory_input, reward_input_rates_ip), size_out=1)
+
+    weights_dist_RP_E = rng.normal(size=n_outputs).reshape((n_outputs, 1))
+    weights_initial_RP_E = (weights_dist_RP_E - weights_dist_RP_E.min()) / (weights_dist_RP_E.max() - weights_dist_RP_E.min()) * 1e-2
+    targets = np.asarray(rng.choice(n_outputs, round(0.4 * n_outputs), replace=False), dtype=np.int32)
+    weights_initial_RP_E[np.logical_not(np.in1d(range(n_outputs), targets)), 0] = 0.
+
+    conn_RP_E = nengo.Connection(reward_input,
+                                 place_network.output.neurons,
+                                 transform=weights_initial_RP_E,
+                                 synapse=nengo.Alpha(0.05))
+    conn_RP_I = nengo.Connection(reward_input,
+                                 place_network.inh.neurons,
+                                 transform=[[1e-3]] * n_inhibitory,
+                                 synapse=nengo.Alpha(0.05))
+
+    weights_dist_RV_E = rng.normal(size=n_excitatory).reshape((n_excitatory, 1))
+    weights_initial_RV_E = (weights_dist_RV_E - weights_dist_RV_E.min()) / (weights_dist_RV_E.max() - weights_dist_RV_E.min()) * 1e-2
+    targets = np.asarray(rng.choice(n_excitatory, round(0.1 * n_excitatory), replace=False), dtype=np.int32)
+    weights_initial_RV_E[np.logical_not(np.in1d(range(n_excitatory), targets)), 0] = 0.
+
+    conn_RV_E = nengo.Connection(reward_input,
+                                 value_network.exc.neurons,
+                                 transform=weights_initial_RV_E,
+                                 synapse=nengo.Alpha(0.05))
+    conn_RV_I = nengo.Connection(reward_input,
+                                 value_network.inh.neurons,
+                                 transform=[[1e-3]] * n_inhibitory,
+                                 synapse=nengo.Alpha(0.05))
     
-    nengo.Connection(place_network.output.neurons,
-                     value_network.output.neurons,
-                     synapse=nengo.Lowpass(0.01),
-                     
-    nengo.Connection(place_network.output.neurons,
-                     value_network.inh.neurons,
-                     synapse=nengo.Lowpass(0.01),
-
-    reward_input = nengo.Node(output=partial(trajectory_input, reward_input_rates), size_out=1)
-                     
-    nengo.Connection(reward_input,
-                     value_network.exc.neurons,
-                     synapse=nengo.Alpha(0.5))
-    nengo.Connection(reward_input,
-                     value_network.inh.neurons,
-                     synapse=nengo.Alpha(0.5))
-
-    nengo.Connection(reward_input,
-                     place_network.exc.neurons,
-                     synapse=nengo.Alpha(0.5))
-    nengo.Connection(reward_input,
-                     place_network.inh.neurons,
-                     synapse=nengo.Alpha(0.5))
-
-                     
-    p_reward = nengo.Probe(reward, synapse=0.5)
+    p_reward = nengo.Probe(reward_input, synapse=0.01)
                      
     with place_network:
         p_output_spikes_place = nengo.Probe(place_network.output.neurons, 'spikes', synapse=0.05)
         p_inh_weights_place = nengo.Probe(place_network.conn_I, 'weights')
         p_exc_weights_place = nengo.Probe(place_network.conn_E, 'weights')
         p_rec_weights_place = nengo.Probe(place_network.conn_EE, 'weights')
+        p_exc_rates_place = nengo.Probe(place_network.exc.neurons, 'rates', synapse=0.05)
+        p_inh_rates_place = nengo.Probe(place_network.inh.neurons, 'rates', synapse=0.05)
                      
     with value_network:
-        p_output_spikes_value = nengo.Probe(place_network.output.neurons, 'spikes', synapse=0.05)
-        
+        p_output_spikes_value = nengo.Probe(value_network.output.neurons, 'spikes', synapse=0.05)
+        p_exc_rates_value = nengo.Probe(value_network.exc.neurons, 'rates', synapse=0.05)
+        p_inh_rates_value = nengo.Probe(value_network.inh.neurons, 'rates', synapse=0.05)
+        p_inh_weights_value = nengo.Probe(value_network.conn_I, 'weights')
+        p_exc_weights_value = nengo.Probe(value_network.conn_E, 'weights')
+
+    p_RP_E_weights = nengo.Probe(conn_RP_E, 'weights')
+    p_RP_I_weights = nengo.Probe(conn_RP_I, 'weights')
+    p_RV_E_weights = nengo.Probe(conn_RV_E, 'weights')
+    p_RV_I_weights = nengo.Probe(conn_RV_I, 'weights')
+    p_PV_E_weights = nengo.Probe(conn_PV_E, 'weights')
+    p_PV_I_weights = nengo.Probe(conn_PV_I, 'weights')
+    
+    
 with nengo.Simulator(model, optimize=True) as sim:
     sim.run(np.max(trj_t))
     
+reward = sim.data[p_reward]
 output_spikes_place = sim.data[p_output_spikes_place]
 output_spikes_value = sim.data[p_output_spikes_value]
 np.save("srf_rmrl_place_output_spikes", np.asarray(output_spikes_place, dtype=np.float32))
 np.save("srf_rmrl_value_output_spikes", np.asarray(output_spikes_value, dtype=np.float32))
 np.save("srf_rmrl_time_range", np.asarray(sim.trange(), dtype=np.float32))
-output_rates = rates_kernel(sim.trange(), output_spikes, tau=0.1)
-#output_rates = sim.data[p_output_rates]
-#plot_spikes(sim.trange(), sim.data[p_inh_rates][0,:])
+output_rates_place = rates_kernel(sim.trange(), output_spikes_place, tau=0.1)
+output_rates_value = rates_kernel(sim.trange(), output_spikes_value, tau=0.1)
+
 
 
 
