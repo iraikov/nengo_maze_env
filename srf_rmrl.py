@@ -95,7 +95,7 @@ arena_y = np.arange(-arena_extent, arena_extent, arena_res)
 
 arena_xx, arena_yy = np.meshgrid(arena_x, arena_y, indexing='ij')
 peak_rate = 1.
-reward_peak_rate = 5.
+reward_peak_rate = 20.
 nmodules_exc = 4
 nmodules_inh = 2
 
@@ -245,7 +245,7 @@ with srf_rmrl_network as model:
     weights_dist_PV_E = rng.normal(size=n_outputs*n_excitatory).reshape((n_excitatory, n_outputs))
     weights_initial_PV_E = (weights_dist_PV_E - weights_dist_PV_E.min()) / (weights_dist_PV_E.max() - weights_dist_PV_E.min()) * 1e-2
     for i in range(n_excitatory):
-        sources = np.asarray(rng.choice(n_outputs, round(0.1 * n_outputs), replace=False), dtype=np.int32)
+        sources = np.asarray(rng.choice(n_outputs, round(0.06 * n_outputs), replace=False), dtype=np.int32)
         weights_initial_PV_E[i, np.logical_not(np.in1d(range(n_outputs), sources))] = 0.
 
     plt.imshow(weights_initial_PV_E.T,  aspect='auto')
