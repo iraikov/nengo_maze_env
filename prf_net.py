@@ -49,7 +49,7 @@ class PRF(nengo.Network):
         assert(w_initial_E > 0)
         assert(w_initial_EI > 0)
         assert(w_initial_EE > 0)
-        
+
         weights_dist_I = rng.normal(size=n_inhibitory*n_outputs).reshape((n_outputs, n_inhibitory))
         weights_initial_I = (weights_dist_I - weights_dist_I.min()) / (weights_dist_I.max() - weights_dist_I.min()) * w_initial_I
 
@@ -75,8 +75,15 @@ class PRF(nengo.Network):
 
         with self:
 
-            self.exc_input = nengo.Node(output=exc_input_func, size_out=n_excitatory)
-            self.inh_input = nengo.Node(output=inh_input_func, size_out=n_inhibitory)
+            if exc_input_func is None:
+                self.exc_input = nengo.Node(output=exc_input_func, size_in=n_excitatory, size_out=n_excitatory)
+            else:
+                self.exc_input = nengo.Node(output=exc_input_func, size_out=n_excitatory)
+                
+            if inh_input_func is None:
+                self.inh_input = nengo.Node(output=inh_input_func, size_in=n_inhibitory, size_out=n_inhibitory)
+            else:
+                self.inh_input = nengo.Node(output=inh_input_func, size_out=n_inhibitory)
 
             with self.exc_ens_config:
 
