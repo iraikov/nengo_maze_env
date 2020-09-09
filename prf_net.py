@@ -75,14 +75,11 @@ class PRF(nengo.Network):
 
         with self:
 
-            if exc_input_func is None:
-                self.exc_input = nengo.Node(output=exc_input_func, size_in=n_excitatory, size_out=n_excitatory)
-            else:
+            self.exc_input = None
+            self.inh_input = None
+            if exc_input_func is not None:
                 self.exc_input = nengo.Node(output=exc_input_func, size_out=n_excitatory)
-                
-            if inh_input_func is None:
-                self.inh_input = nengo.Node(output=inh_input_func, size_in=n_inhibitory, size_out=n_inhibitory)
-            else:
+            if inh_input_func is not None:
                 self.inh_input = nengo.Node(output=inh_input_func, size_out=n_inhibitory)
 
             with self.exc_ens_config:
@@ -96,13 +93,15 @@ class PRF(nengo.Network):
             with self.out_ens_config:
                 self.output = nengo.Ensemble(self.n_outputs, dimensions=self.dimensions)
 
-            nengo.Connection(self.exc_input, self.exc.neurons,
-                             synapse=nengo.Lowpass(0.01),
-                             transform=np.eye(n_excitatory))
+            if self.exc_input is not None:
+                nengo.Connection(self.exc_input, self.exc.neurons,
+                                synapse=nengo.Lowpass(0.01),
+                                transform=np.eye(n_excitatory))
             
-            nengo.Connection(self.inh_input, self.inh.neurons,
-                             synapse=nengo.Lowpass(0.01),
-                             transform=np.eye(n_inhibitory))
+            if self.inh_input is not None:
+                nengo.Connection(self.inh_input, self.inh.neurons,
+                                synapse=nengo.Lowpass(0.01),
+                                transform=np.eye(n_inhibitory))
 
             
             self.conn_I = nengo.Connection(self.inh.neurons,

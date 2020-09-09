@@ -14,6 +14,7 @@ from nengo_extras.neurons import (
     NumbaLIF, rates_kernel, rates_isi )
 from prf_net import PRF
 from hsp import HSP
+from rmsp import RMSP
 
 def consecutive(data):
     """
@@ -270,16 +271,16 @@ with srf_rmrl_network as model:
                         seed=seed)
 
     weights_dist_PV_E = rng.normal(size=n_outputs*n_excitatory_value).reshape((n_excitatory_value, n_outputs))
-    weights_initial_PV_E = (weights_dist_PV_E - weights_dist_PV_E.min()) / (weights_dist_PV_E.max() - weights_dist_PV_E.min()) * 1e-1
+    weights_initial_PV_E = (weights_dist_PV_E - weights_dist_PV_E.min()) / (weights_dist_PV_E.max() - weights_dist_PV_E.min()) * 1e-2
     for i in range(n_excitatory_value):
-        sources = np.asarray(rng.choice(n_outputs, round(0.02 * n_outputs), replace=False), dtype=np.int32)
+        sources = np.asarray(rng.choice(n_outputs, round(0.2 * n_outputs), replace=False), dtype=np.int32)
         weights_initial_PV_E[i, np.logical_not(np.in1d(range(n_outputs), sources))] = 0.
 
     conn_PV_E = nengo.Connection(place_network.output.neurons,
                                  value_network.exc.neurons,
                                  transform=weights_initial_PV_E,
                                  synapse=nengo.Alpha(0.01),
-                                 learning_rule_type=HSP(learning_rate=1e-4))
+                                 learning_rule_type=RMSP(learning_rate=1e-3))
 
     weights_dist_PV_I = rng.uniform(size=n_inhibitory_value*n_outputs).reshape((n_inhibitory_value, n_outputs))
     weights_initial_PV_I = (weights_dist_PV_I - weights_dist_PV_I.min()) / (weights_dist_PV_I.max() - weights_dist_PV_I.min()) * 1e-1
@@ -296,35 +297,10 @@ with srf_rmrl_network as model:
                                              trajectory_input_matrix(reward_input_rates_ip, trj_t)),
                               size_out=1)
 
-    weights_dist_RP_E = rng.normal(size=n_excitatory).reshape((n_excitatory, 1))
-    weights_initial_RP_E = (weights_dist_RP_E - weights_dist_RP_E.min()) / (weights_dist_RP_E.max() - weights_dist_RP_E.min()) * 1e-1
-    targets = np.asarray(rng.choice(n_excitatory, round(0.4 * n_excitatory), replace=False), dtype=np.int32)
-    weights_initial_RP_E[np.logical_not(np.in1d(range(n_excitatory), targets)), 0] = 0.
-
-    conn_RP_E = nengo.Connection(reward_input,
-                                 place_network.exc.neurons,
-                                 transform=weights_initial_RP_E,
-                                 synapse=nengo.Lowpass(0.03))
-    conn_RP_I = nengo.Connection(reward_input,
-                                 place_network.inh.neurons,
-                                 transform=[[1e-3]] * n_inhibitory,
-                                 synapse=nengo.Lowpass(0.03))
-
-    weights_dist_RV_E = rng.normal(size=n_excitatory_value).reshape((n_excitatory_value, 1))
-    weights_initial_RV_E = (weights_dist_RV_E - weights_dist_RV_E.min()) / (weights_dist_RV_E.max() - weights_dist_RV_E.min()) * 1e-1
-    targets = np.asarray(rng.choice(n_excitatory, round(0.4 * n_excitatory_value), replace=False), dtype=np.int32)
-    weights_initial_RV_E[np.logical_not(np.in1d(range(n_excitatory_value), targets)), 0] = 0.
-
-    conn_RV_E = nengo.Connection(reward_input,
-                                 value_network.exc.neurons,
-                                 transform=weights_initial_RV_E,
-                                 synapse=nengo.Lowpass(0.03))
-    conn_RV_I = nengo.Connection(reward_input,
-                                 value_network.inh.neurons,
-                                 transform=[[1e-3]] * n_inhibitory_value,
-                                 synapse=nengo.Lowpass(0.03))
+    nengo.Connection(reward_input, conn_PV_E.learning_rule,
+                     synapse=nengo.Triangle(1.0))
     
-    p_reward = nengo.Probe(reward_input, synapse=0.01)
+    p_reward = nengo.Probe(reward_input, synapse=nengo.Triangle(1.0))
                      
     with place_network:
         p_output_spikes_place = nengo.Probe(place_network.output.neurons, 'spikes', synapse=0.05)
