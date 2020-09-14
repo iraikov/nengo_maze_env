@@ -181,8 +181,8 @@ for m in inh_input_rates_dict:
         input_rates_ip = make_interp_spline(trj_t, input_rates, k=3)
         inh_trajectory_inputs.append(input_rates_ip)
 
-reward_idxs = np.argwhere(np.logical_and(np.isclose(trj_x, reward_pos[0], atol=1e-1, rtol=1e-1),
-                                         np.isclose(trj_y, reward_pos[1], atol=1e-1, rtol=1e-1)))
+reward_idxs = np.argwhere(np.logical_and(np.isclose(trj_x, reward_pos[0], atol=1e-2, rtol=1e-2),
+                                         np.isclose(trj_y, reward_pos[1], atol=1e-2, rtol=1e-2)))
 reward_loc_ranges = consecutive(reward_idxs.flat)[:-1]
 reward_input_rates = np.zeros((trj_t.shape[0], 1))
 for reward_loc_idxs in reward_loc_ranges:
@@ -264,10 +264,7 @@ with srf_rmrl_network as model:
     value_network = PRF(n_excitatory = n_excitatory_value,
                         n_inhibitory = n_inhibitory_value,
                         n_outputs = n_outputs,
-                        p_EI = 0.5,
-                        p_EE = 0.02,
                         label="Value network",
-                        isp_target_rate = 1.0,
                         seed=seed)
 
     weights_dist_PV_E = rng.normal(size=n_outputs*n_excitatory_value).reshape((n_excitatory_value, n_outputs))
@@ -280,12 +277,12 @@ with srf_rmrl_network as model:
                                  value_network.exc.neurons,
                                  transform=weights_initial_PV_E,
                                  synapse=nengo.Alpha(0.01),
-                                 learning_rule_type=RMSP(learning_rate=1e-3))
+                                 learning_rule_type=RMSP(learning_rate=2e-4))
 
     weights_dist_PV_I = rng.uniform(size=n_inhibitory_value*n_outputs).reshape((n_inhibitory_value, n_outputs))
     weights_initial_PV_I = (weights_dist_PV_I - weights_dist_PV_I.min()) / (weights_dist_PV_I.max() - weights_dist_PV_I.min()) * 1e-1
     for i in range(n_inhibitory_value):
-        sources = np.asarray(rng.choice(n_outputs, round(0.4 * n_outputs), replace=False), dtype=np.int32)
+        sources = np.asarray(rng.choice(n_outputs, round(0.5 * n_outputs), replace=False), dtype=np.int32)
         weights_initial_PV_I[i, np.logical_not(np.in1d(range(n_outputs), sources))] = 0.
 
     conn_PV_I = nengo.Connection(place_network.output.neurons,
@@ -298,22 +295,22 @@ with srf_rmrl_network as model:
                               size_out=1)
 
     nengo.Connection(reward_input, conn_PV_E.learning_rule,
-                     synapse=nengo.Triangle(1.0))
+                     synapse=nengo.Alpha(0.5))
     
-    p_reward = nengo.Probe(reward_input, synapse=nengo.Triangle(1.0))
+    p_reward = nengo.Probe(reward_input, synapse=nengo.Alpha(0.5))
                      
     with place_network:
-        p_output_spikes_place = nengo.Probe(place_network.output.neurons, 'spikes', synapse=0.05)
+        p_output_spikes_place = nengo.Probe(place_network.output.neurons, 'spikes')
         p_inh_weights_place = nengo.Probe(place_network.conn_I, 'weights')
         p_exc_weights_place = nengo.Probe(place_network.conn_E, 'weights')
         p_rec_weights_place = nengo.Probe(place_network.conn_EE, 'weights')
-        p_exc_rates_place = nengo.Probe(place_network.exc.neurons, 'rates', synapse=0.05)
-        p_inh_rates_place = nengo.Probe(place_network.inh.neurons, 'rates', synapse=0.05)
+        p_exc_rates_place = nengo.Probe(place_network.exc.neurons, 'rates')
+        p_inh_rates_place = nengo.Probe(place_network.inh.neurons, 'rates')
                      
     with value_network:
-        p_output_spikes_value = nengo.Probe(value_network.output.neurons, 'spikes', synapse=0.05)
-        p_exc_rates_value = nengo.Probe(value_network.exc.neurons, 'rates', synapse=0.05)
-        p_inh_rates_value = nengo.Probe(value_network.inh.neurons, 'rates', synapse=0.05)
+        p_output_spikes_value = nengo.Probe(value_network.output.neurons, 'spikes')
+        p_exc_rates_value = nengo.Probe(value_network.exc.neurons, 'rates')
+        p_inh_rates_value = nengo.Probe(value_network.inh.neurons, 'rates')
         p_inh_weights_value = nengo.Probe(value_network.conn_I, 'weights')
         p_exc_weights_value = nengo.Probe(value_network.conn_E, 'weights')
 

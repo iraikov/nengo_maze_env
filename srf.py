@@ -211,7 +211,7 @@ srf_network = PRF(exc_input_func = partial(trajectory_input, exc_trajectory_inpu
                   seed=seed)
 
 with srf_network:
-    p_output_spikes = nengo.Probe(srf_network.output.neurons, 'output', synapse=0.05)
+    p_output_spikes = nengo.Probe(srf_network.output.neurons, 'spikes')
     p_inh_weights = nengo.Probe(srf_network.conn_I, 'weights')
     p_exc_weights = nengo.Probe(srf_network.conn_E, 'weights')
     p_rec_weights = nengo.Probe(srf_network.conn_EE, 'weights')

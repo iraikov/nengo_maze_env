@@ -56,7 +56,9 @@ class RMSP(LearningRuleType):
 #@jit(nopython=True)
 def step_jit(kappa, post_filtered, pre_filtered, weights, reward, sgn, mask, delta):
     rdelta = pre_filtered - reward
-    rdelta[rdelta > 0] = 1.
+    rdpos = rdelta > 0
+    if np.any(rdpos):
+        rdelta[rdpos] /= rdelta[rdpos].max()
     for i in range(weights.shape[0]):
         factor = 1.0 - (np.dot(weights[i,:], weights[i,:].T) / np.linalg.norm(weights[i,:]))
         sgn[i,:] = rdelta

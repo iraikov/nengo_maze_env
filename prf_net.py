@@ -168,7 +168,7 @@ class PRF(nengo.Network):
             "neuron_type": nengo.LIF(),
             "radius": 1,
             "intercepts": nengo.dists.Choice([0.1]*self.dimensions),
-            "max_rates": nengo.dists.Choice([20])
+            "max_rates": nengo.dists.Choice([40])
             }
             )
         cfg[nengo.Connection].synapse = None

@@ -327,7 +327,7 @@ with srf_rmrl_network as model:
     p_reward = nengo.Probe(reward_input, synapse=0.01)
                      
     with place_network:
-        p_output_spikes_place = nengo.Probe(place_network.output.neurons, 'spikes', synapse=0.05)
+        p_output_spikes_place = nengo.Probe(place_network.output.neurons, 'spikes')
         p_inh_weights_place = nengo.Probe(place_network.conn_I, 'weights')
         p_exc_weights_place = nengo.Probe(place_network.conn_E, 'weights')
         p_rec_weights_place = nengo.Probe(place_network.conn_EE, 'weights')
@@ -335,7 +335,7 @@ with srf_rmrl_network as model:
         p_inh_rates_place = nengo.Probe(place_network.inh.neurons, 'rates', synapse=0.05)
                      
     with value_network:
-        p_output_spikes_value = nengo.Probe(value_network.output.neurons, 'spikes', synapse=0.05)
+        p_output_spikes_value = nengo.Probe(value_network.output.neurons, 'spikes')
         p_exc_rates_value = nengo.Probe(value_network.exc.neurons, 'rates', synapse=0.05)
         p_inh_rates_value = nengo.Probe(value_network.inh.neurons, 'rates', synapse=0.05)
         p_inh_weights_value = nengo.Probe(value_network.conn_I, 'weights')

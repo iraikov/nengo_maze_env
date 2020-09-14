@@ -31,7 +31,7 @@ class ISP(LearningRuleType):
     
     learning_rate = NumberParam("learning_rate", low=0, readonly=True, default=1e-6)
     rho0 = NumberParam("rho0", low=0, readonly=True, default=10.)
-    pre_synapse = SynapseParam("pre_synapse", default=Lowpass(tau=0.01), readonly=True)
+    pre_synapse = SynapseParam("pre_synapse", default=Lowpass(tau=0.02), readonly=True)
     post_synapse = SynapseParam("post_synapse", default=None, readonly=True)
 
     def __init__(self,
