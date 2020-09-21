@@ -11,7 +11,7 @@ import nengo
 from nengo_extras.plot_spikes import (
     cluster, merge, plot_spikes, preprocess_spikes, sample_by_variance, sample_by_activity)
 from nengo_extras.neurons import (
-    NumbaLIF, rates_kernel, rates_isi )
+    rates_kernel, rates_isi )
 from prf_net import PRF
 
 # In[2]:
@@ -201,22 +201,17 @@ N_Outputs = 50
 N_Exc = len(exc_trajectory_inputs)
 N_Inh = len(inh_trajectory_inputs)
 
-def make_srf_network(seed=19):
-    rng = np.random.RandomState(seed=seed)
-    srf = PRF(exc_input = partial(trajectory_input, exc_trajectory_inputs),
-              inh_input = partial(trajectory_input, inh_trajectory_inputs),
-              n_excitatory = N_Exc,
-              n_inhibitory = N_Inh,
-              n_outputs = N_Outputs,
-              label="Spatial receptive field network",
-              seed=seed)
-    srf.out_ens_config[nengo.Ensemble].update({"neuron_type": NumbaLIF()})
-    return srf
-    
-srf_network = make_srf_network()
+seed = 19
+srf_network = PRF(exc_input_func = partial(trajectory_input, exc_trajectory_inputs),
+                  inh_input_func = partial(trajectory_input, inh_trajectory_inputs),
+                  n_excitatory = N_Exc,
+                  n_inhibitory = N_Inh,
+                  n_outputs = N_Outputs,
+                  label="Spatial receptive field network",
+                  seed=seed)
 
 with srf_network:
-    p_output_spikes = nengo.Probe(srf_network.output.neurons, 'spikes', synapse=0.05)
+    p_output_spikes = nengo.Probe(srf_network.output.neurons, 'spikes')
     p_inh_weights = nengo.Probe(srf_network.conn_I, 'weights')
     p_exc_weights = nengo.Probe(srf_network.conn_E, 'weights')
     p_rec_weights = nengo.Probe(srf_network.conn_EE, 'weights')

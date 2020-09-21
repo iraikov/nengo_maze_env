@@ -5,11 +5,12 @@ from nengo.builder import Builder, Operator, Signal
 from nengo.builder.neurons import SimNeurons
 from nengo.learning_rules import *
 from nengo.builder.learning_rules import *
-from nengo.params import (NumberParam)
+from nengo.params import (NumberParam, BoolParam)
 from nengo.utils.compat import is_iterable, is_string, itervalues, range
 from nengo.builder.operator import DotInc, ElementwiseInc, Copy, Reset
 from nengo.connection import LearningRule
 from nengo.ensemble import Ensemble, Neurons
+from numba import jit
 
 # Creates new learning rule for Hebbian synaptic plasticity (HSP).
 # Based on the paper:
@@ -31,22 +32,35 @@ class HSP(LearningRuleType):
     learning_rate = NumberParam("learning_rate", low=0, readonly=True, default=1e-6)
     pre_synapse = SynapseParam("pre_synapse", default=Lowpass(tau=0.005), readonly=True)
     post_synapse = SynapseParam("post_synapse", default=None, readonly=True)
+    jit = BoolParam("jit", default=True, readonly=True)
 
     def __init__(self,
                  learning_rate=Default,
                  pre_synapse=Default,
                  post_synapse=Default,
-                 theta_synapse=Default):
+                 theta_synapse=Default,
+                 jit=Default):
         super().__init__(learning_rate, size_in=0)
         self.pre_synapse = pre_synapse
         self.post_synapse = (
             self.pre_synapse if post_synapse is Default else post_synapse
         )
+        self.jit = jit
 
     @property
     def _argreprs(self):
         return _remove_default_post_synapse(super()._argreprs, self.pre_synapse)
 
+@jit(nopython=True)
+def step_jit(kappa, post_filtered, pre_filtered, weights, sgn, mask, delta):
+    for i in range(weights.shape[0]):
+        factor = 1.0 - (np.dot(weights[i,:], weights[i,:].T) / np.linalg.norm(weights[i,:]))
+        lt = np.argwhere(pre_filtered < post_filtered[i])
+        if len(lt) > 0:
+            for j in range(lt.shape[0]):
+                sgn[i,j] = -1
+        delta[i,:] = sgn[i,:] * kappa * factor * pre_filtered * mask[i,:] * post_filtered[i]
+     
 
 # Builders for HSP
 class SimHSP(Operator):
@@ -90,7 +104,7 @@ class SimHSP(Operator):
     4. updates ``[delta]``
     """
 
-    def __init__(self, pre_filtered, post_filtered, weights, delta, learning_rate, tag=None):
+    def __init__(self, pre_filtered, post_filtered, weights, delta, learning_rate, jit, tag=None):
         super(SimHSP, self).__init__(tag=tag)
         self.learning_rate = learning_rate
         self.sets = []
@@ -99,8 +113,9 @@ class SimHSP(Operator):
         self.updates = [delta]
         assert(np.all(np.linalg.norm(weights.initial_value, axis=1) > 0.))
         self.mask = np.logical_not(np.isclose(weights.initial_value, 0.))
-
-
+        self.sgn = np.ones(weights.initial_value.shape)
+        self.jit = jit
+        
     @property
     def delta(self):
         return self.updates[0]
@@ -133,25 +148,29 @@ class SimHSP(Operator):
         kappa = self.learning_rate * dt
         weights = signals[self.weights]
         mask = self.mask
-
+        sgn = self.sgn
+        jit = self.jit
+        
         def step_simhsp():
-            ## This code below is an optimized version of:
+            ## The code below is an optimized version of:
             #for i in range(weights.shape[0]):
             #    factor = 1.0 - (np.dot(weights[i,:], weights[i,:].T) / np.linalg.norm(weights[i,:]))
             #    delta[i,:] = kappa * factor * pre_filtered * self.mask[i,:] * post_filtered[i]
 
-            factor = 1.0 - (np.einsum('ij,ji->i',weights, weights.T) / np.linalg.norm(weights,axis=1))
-            a = kappa * factor * post_filtered
-            np.multiply(self.mask, pre_filtered, out=delta)
-            np.multiply(a[:, np.newaxis], delta, out=delta)
-            sgn = np.row_stack([np.asarray([-1 if pre_filtered[j] < post_filtered[i] else 1
-                                            for j in range(weights.shape[1])])
-                                for i in range(weights.shape[0])])
-            np.multiply(sgn, delta, out=delta)
-            delta_sum = np.add(delta, weights)
-            negz = np.nonzero(delta_sum <= 1e-6)
-            delta[negz] = 0.
-
+            sgn[:,:] = 1
+            if jit:
+                step_jit(kappa, post_filtered, pre_filtered, weights, sgn, mask, delta)
+            else:
+                factor = 1.0 - (np.einsum('ij,ji->i',weights, weights.T) / np.linalg.norm(weights,axis=1))
+                a = kappa * factor * post_filtered
+                for i in range(weights.shape[0]):
+                    sgn[i,np.flatnonzero(pre_filtered < post_filtered[i])] = -1
+                np.multiply(mask, pre_filtered, out=delta)
+                np.multiply(np.expand_dims(a, 1), delta, out=delta)
+                np.multiply(sgn, delta, out=delta)
+                delta_sum = np.add(delta, weights)
+                negz = np.nonzero(delta_sum <= 1e-6)
+                delta[negz] = 0.
             
         return step_simhsp
 
@@ -193,6 +212,7 @@ def build_hsp(model, hsp, rule):
             weights,
             model.sig[rule]["delta"],
             learning_rate=hsp.learning_rate,
+            jit=hsp.jit,
         )
     )
 

@@ -49,7 +49,7 @@ class PRF(nengo.Network):
         assert(w_initial_E > 0)
         assert(w_initial_EI > 0)
         assert(w_initial_EE > 0)
-        
+
         weights_dist_I = rng.normal(size=n_inhibitory*n_outputs).reshape((n_outputs, n_inhibitory))
         weights_initial_I = (weights_dist_I - weights_dist_I.min()) / (weights_dist_I.max() - weights_dist_I.min()) * w_initial_I
 
@@ -75,8 +75,12 @@ class PRF(nengo.Network):
 
         with self:
 
-            self.exc_input = nengo.Node(output=exc_input_func, size_out=n_excitatory)
-            self.inh_input = nengo.Node(output=inh_input_func, size_out=n_inhibitory)
+            self.exc_input = None
+            self.inh_input = None
+            if exc_input_func is not None:
+                self.exc_input = nengo.Node(output=exc_input_func, size_out=n_excitatory)
+            if inh_input_func is not None:
+                self.inh_input = nengo.Node(output=inh_input_func, size_out=n_inhibitory)
 
             with self.exc_ens_config:
 
@@ -89,13 +93,15 @@ class PRF(nengo.Network):
             with self.out_ens_config:
                 self.output = nengo.Ensemble(self.n_outputs, dimensions=self.dimensions)
 
-            nengo.Connection(self.exc_input, self.exc.neurons,
-                             synapse=nengo.Lowpass(0.01),
-                             transform=np.eye(n_excitatory))
+            if self.exc_input is not None:
+                nengo.Connection(self.exc_input, self.exc.neurons,
+                                synapse=nengo.Lowpass(0.01),
+                                transform=np.eye(n_excitatory))
             
-            nengo.Connection(self.inh_input, self.inh.neurons,
-                             synapse=nengo.Lowpass(0.01),
-                             transform=np.eye(n_inhibitory))
+            if self.inh_input is not None:
+                nengo.Connection(self.inh_input, self.inh.neurons,
+                                synapse=nengo.Lowpass(0.01),
+                                transform=np.eye(n_inhibitory))
 
             
             self.conn_I = nengo.Connection(self.inh.neurons,
@@ -162,7 +168,7 @@ class PRF(nengo.Network):
             "neuron_type": nengo.LIF(),
             "radius": 1,
             "intercepts": nengo.dists.Choice([0.1]*self.dimensions),
-            "max_rates": nengo.dists.Choice([20])
+            "max_rates": nengo.dists.Choice([40])
             }
             )
         cfg[nengo.Connection].synapse = None
