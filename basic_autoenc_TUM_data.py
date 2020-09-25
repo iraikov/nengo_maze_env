@@ -1,57 +1,48 @@
 from PIL import Image
 import glob
 import numpy as np
+import matplotlib.pyplot as plt
 import sklearn
 from sklearn.model_selection import train_test_split
-import tensorflow as tf
-from tensorflow.keras import layers, losses
-from tensorflow.keras.datasets import fashion_mnist
-from tensorflow.keras.models import Model
-try:
-    import tensorflow.contrib.eager as tfe
-    tf.enable_eager_execution()
-except:
-    pass
+from basic_autoenc import Autoencoder
 
 list_data = glob.glob("./rgbd_dataset_freiburg1_xyz/rgb/*.png")
 
-X_train, X_test = train_test_split(list_data, test_size=0.33, random_state=27)
+X_train, X_test = train_test_split(list_data, test_size=0.2, random_state=27)
+
+xdim = 128
+ydim = 96
 
 n_train = len(X_train)
-train_data = np.zeros((n_train,480,640))
+train_data = np.zeros((n_train,xdim,ydim))
 for i in range(n_train):
-    train_data_temp = np.asarray(Image.open(X_train[i]).convert('LA'))/255
-    train_data[i,:,:] = train_data_temp[:,:,0]
+    train_data_temp = np.array(Image.open(X_train[i]).resize((xdim,ydim)).convert('LA'))/255.
+    train_data[i,:,:] = train_data_temp[:,:,0].T
     
 n_test = len(X_test)
-test_data = np.zeros((n_test,480,640))
+test_data = np.zeros((n_test,xdim,ydim))
 for i in range(n_test):
-    test_data_temp = np.asarray(Image.open(X_test[i]).convert('LA'))/255
-    test_data[i,:,:] = test_data_temp[:,:,0]
+    test_data_temp = np.array(Image.open(X_test[i]).resize((xdim,ydim)).convert('LA'))/255.
+    test_data[i,:,:] = test_data_temp[:,:,0].T
 
-latent_dim = 64
+encoding_dim = 256
 
-class Autoencoder(Model):
-  def __init__(self, encoding_dim):
-    super(Autoencoder, self).__init__()
-    self.latent_dim = latent_dim   
-    self.encoder = tf.keras.Sequential([
-      layers.Flatten(),
-      layers.Dense(latent_dim, activation='relu'),
-    ])
-    self.decoder = tf.keras.Sequential([
-      layers.Dense(307200, activation='sigmoid'),
-      layers.Reshape((480, 640))
-    ])
-
-  def call(self, x):
-    encoded = self.encoder(x)
-    decoded = self.decoder(encoded)
-    return decoded
-
-autoencoder = Autoencoder(latent_dim) 
-autoencoder.compile(optimizer='adam', loss=losses.MeanSquaredError())
-
-autoencoder.fit(train_data, train_data, epochs=10, shuffle=True, validation_data=(test_data, test_data))
+autoencoder = Autoencoder(encoding_dim, xdim, ydim)
+history = autoencoder.train(train_data, test_data)
 
 low_dim_data = autoencoder.encoder(test_data).numpy()
+encoded = autoencoder.encoder.predict(test_data)
+decoded = autoencoder.decoder.predict(encoded)
+
+plt.subplot(211)
+plt.title('Loss')
+plt.plot(history.history['loss'], label='train')
+plt.plot(history.history['val_loss'], label='test')
+plt.legend()
+# plot mse during training
+plt.subplot(212)
+plt.title('Mean Squared Error')
+plt.plot(history.history['mean_squared_error'], label='train')
+plt.plot(history.history['val_mean_squared_error'], label='test')
+plt.legend()
+plt.show()
