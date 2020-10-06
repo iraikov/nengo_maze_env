@@ -1,10 +1,11 @@
+
 from PIL import Image
 import glob
 import numpy as np
 import matplotlib.pyplot as plt
 import sklearn
 from sklearn.model_selection import train_test_split
-from basic_autoenc import Autoencoder
+from autoencoder import Autoencoder
 
 list_data = glob.glob("./rgbd_dataset_freiburg1_xyz/rgb/*.png")
 
@@ -28,7 +29,7 @@ for i in range(n_test):
 encoding_dim = 256
 
 autoencoder = Autoencoder(encoding_dim, xdim, ydim)
-history = autoencoder.train(train_data, test_data)
+history = autoencoder.train(train_data, test_data, epochs=30)
 
 low_dim_data = autoencoder.encoder(test_data).numpy()
 encoded = autoencoder.encoder.predict(test_data)
@@ -40,9 +41,9 @@ plt.plot(history.history['loss'], label='train')
 plt.plot(history.history['val_loss'], label='test')
 plt.legend()
 # plot mse during training
-plt.subplot(212)
-plt.title('Mean Squared Error')
-plt.plot(history.history['mean_squared_error'], label='train')
-plt.plot(history.history['val_mean_squared_error'], label='test')
-plt.legend()
-plt.show()
+#plt.subplot(212)
+#plt.title('Mean Squared Error')
+#plt.plot(history.history['mean_squared_error'], label='train')
+#plt.plot(history.history['val_mean_squared_error'], label='test')
+#plt.legend()
+#plt.show()

@@ -6,7 +6,6 @@ from nengo.builder.neurons import SimNeurons
 from nengo.learning_rules import *
 from nengo.builder.learning_rules import *
 from nengo.params import (NumberParam)
-from nengo.utils.compat import is_iterable, is_string, itervalues, range
 from nengo.builder.operator import DotInc, ElementwiseInc, Copy, Reset
 from nengo.connection import LearningRule
 from nengo.ensemble import Ensemble, Neurons
