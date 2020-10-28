@@ -215,7 +215,9 @@ with srf_network:
     p_inh_weights = nengo.Probe(srf_network.conn_I, 'weights')
     p_exc_weights = nengo.Probe(srf_network.conn_E, 'weights')
     p_rec_weights = nengo.Probe(srf_network.conn_EE, 'weights')
-        
+    p_exc_rates = nengo.Probe(srf_network.exc.neurons, 'rates')
+    p_inh_rates = nengo.Probe(srf_network.inh.neurons, 'rates')
+    
 with nengo.Simulator(srf_network, optimize=True) as sim:
     sim.run(np.max(trj_t))
     

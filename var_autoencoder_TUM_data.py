@@ -27,7 +27,7 @@ def generate_and_save_images(vae, epoch_label, test_sample):
 xdim = 128
 ydim = 96
 original_dim = xdim*ydim
-latent_dim = 512
+latent_dim = 256
 
 epochs = 10
 batch_size = 8
@@ -37,7 +37,7 @@ n_input = len(list_data)
 all_data = np.zeros((n_input,xdim,ydim))
 for i in range(n_input):
     data_frame = np.array(Image.open(list_data[i]).resize((xdim,ydim)).convert('LA'))/255.
-    all_data[i,:,:] = data_frame[:,:,0].astype('float32').T
+    all_data[i] = data_frame[:,:,0].astype('float32').T.reshape((xdim,ydim))
 
 
 X_train, X_test = train_test_split(range(n_input), test_size=0.2, random_state=27)
@@ -47,24 +47,21 @@ n_test = len(X_test)
 train_data = np.zeros((n_train,xdim,ydim))
 test_data = np.zeros((n_test,xdim,ydim))
 for i in range(n_train):
-    train_data[i,:,:] = all_data[X_train[i],:,:]
+    train_data[i] = all_data[X_train[i]]
 for i in range(n_test):
-    test_data[i,:,:] = all_data[X_test[i],:,:]
+    test_data[i,] = all_data[X_test[i]]
 
 
-train_dataset = tf.data.Dataset.from_tensor_slices(train_data).batch(batch_size)
-test_dataset = tf.data.Dataset.from_tensor_slices(test_data).batch(batch_size)
-
-vae = make_vae(xdim, ydim, latent_dim)
-history = vae.fit(train_dataset, epochs=epochs, batch_size=batch_size, shuffle=True,
-                  validation_data=test_dataset)
+vae = make_vae(xdim, ydim, latent_dim, beta=5.)
+history = vae.fit(train_data, 
+                   epochs=epochs, batch_size=batch_size, shuffle=True,
+                   validation_data=(test_data, None))
 vae(all_data)
 vae.save("vae_dataset_freiburg1")
-test_sample_size = 2
-for test_batch in test_dataset.take(1):
-    test_sample = test_batch[0:test_sample_size, :, :]
+test_sample_size = 4
+test_sample = test_data[0:test_sample_size, :, :]
 
-#z_test = vae.encoder.predict(test_dataset, batch_size=batch_size)
+_ , _, encoded_input = vae.encoder.predict(all_data) 
 #plt.figure(figsize=(6, 6))
 #plt.scatter(z_test[:, 0], z_test[:, 1], c=y_test,
 #            alpha=.4, s=3**2, cmap='viridis')

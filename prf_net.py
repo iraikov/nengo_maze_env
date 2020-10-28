@@ -20,9 +20,11 @@ class PRF(nengo.Network):
                  w_initial_E =  1e-1, # baseline excitatory synaptic weight
                  w_initial_EI =  1e-3, # baseline feedback inhibition synaptic weight
                  w_initial_EE =  1e-3, # baseline recurrent excitatory synaptic weight
+                 w_EI_Ext = 1e-3, # weight of excitatory connection to inhibitory inputs (when connect_exc_inh_input = True)
                  p_E = 0.4, # uniform probability of connection of excitatory inputs to outputs
                  p_EI = 0.4, # uniform probability of feedback connections to inhibitory cells
                  p_EE = 0.1, # uniform probability of recurrent connections
+                 p_EI_Ext = 0.25, # uniform probability of excitatory connection to inhibitory inputs (when connect_exc_inh_input = True)
                  tau_I = 0.03, # filter for inhibitory inputs
                  tau_E = 0.01, # filter for excitatory inputs
                  tau_EI = 0.01, # filter for feedback inhibitory connections
@@ -31,6 +33,7 @@ class PRF(nengo.Network):
                  learning_rate_E = 1e-5, # learning rate for associative excitatory plasticity
                  learning_rate_EE = 1e-5, # learning rate for recurrent excitatory plasticity
                  isp_target_rate = 2.0, # target firing rate for inhibitory plasticity
+                 connect_exc_inh_input = False,
                  label = None,
                  seed = 0,
                  add_to_container = None,
@@ -81,7 +84,7 @@ class PRF(nengo.Network):
                 self.exc_input = nengo.Node(output=exc_input_func, size_out=n_excitatory)
             if inh_input_func is not None:
                 self.inh_input = nengo.Node(output=inh_input_func, size_out=n_inhibitory)
-
+                
             with self.exc_ens_config:
 
                 self.exc = nengo.Ensemble(self.n_excitatory, dimensions=self.dimensions)
@@ -103,6 +106,15 @@ class PRF(nengo.Network):
                                 synapse=nengo.Lowpass(0.01),
                                 transform=np.eye(n_inhibitory))
 
+            if connect_exc_inh_input and (self.exc_input is not None):
+                weights_dist_EI_Ext = rng.uniform(size=n_excitatory*n_inhibitory).reshape((n_inhibitory, n_excitatory)) * w_EI_Ext
+                for i in range(n_inhibitory):
+                    sources_Exc = np.asarray(rng.choice(n_excitatory, round(p_EI_Ext * n_excitatory), replace=False), dtype=np.int32)
+                    weights_dist_EI_Ext[i, np.logical_not(np.in1d(range(n_excitatory), sources_Exc))] = 0.
+                nengo.Connection(self.exc.neurons, self.inh.neurons,
+                                synapse=nengo.Lowpass(0.01),
+                                transform=weights_dist_EI_Ext)
+                
             
             self.conn_I = nengo.Connection(self.inh.neurons,
                                            self.output.neurons,
@@ -128,6 +140,7 @@ class PRF(nengo.Network):
                                             transform=weights_initial_EE,
                                             synapse=nengo.Alpha(tau_EE),
                                             learning_rule_type=HSP(learning_rate=learning_rate_EE))
+
                              
     @property
     def exc_ens_config(self):

@@ -21,7 +21,7 @@ class Autoencoder(Model):
     self.encoder.add(layers.InputLayer(input_shape=(xdim, ydim)))
     self.encoder.add(layers.Flatten())
     self.encoder.add(layers.Dense(encoding_dim, activation='relu'))
-                                   #activity_regularizer=regularizers.l1(10e-5)))
+                                  
     
     self.decoder.add(layers.InputLayer(input_shape=(encoding_dim,)))
     self.decoder.add(layers.Dense(xdim*ydim, activation='sigmoid'))

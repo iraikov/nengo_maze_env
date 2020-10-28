@@ -37,7 +37,6 @@ class HSP(LearningRuleType):
                  learning_rate=Default,
                  pre_synapse=Default,
                  post_synapse=Default,
-                 theta_synapse=Default,
                  jit=Default):
         super().__init__(learning_rate, size_in=0)
         self.pre_synapse = pre_synapse
