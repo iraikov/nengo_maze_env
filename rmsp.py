@@ -60,7 +60,7 @@ def step_jit(kappa, post_filtered, pre_filtered, weights, reward, sgn, mask, del
     if np.any(rdpos):
         rdelta[rdpos] /= rdelta[rdpos].max()
     for i in range(weights.shape[0]):
-        factor = 1.0 - (np.dot(weights[i,:], weights[i,:].T) / np.linalg.norm(weights[i,:]))
+        factor = 1.0 - ((weights[i,:] * weights[i,:].T) / np.dot(weights[i,:], weights[i,:]))
         sgn[i,:] = rdelta
         delta[i,:] = sgn[i,:] * kappa * factor * pre_filtered * mask[i,:] * post_filtered[i] * reward
 
@@ -163,27 +163,19 @@ class SimRMSP(Operator):
         jit = self.jit
         
         def step_simrmsp():
-            ## The code below is an optimized version of:
-            #for i in range(weights.shape[0]):
-            #    factor = 1.0 - (np.dot(weights[i,:], weights[i,:].T) / np.linalg.norm(weights[i,:]))
-            #    delta[i,:] = kappa * factor * pre_filtered * self.mask[i,:] * post_filtered[i]
 
             if jit:
                 step_jit(kappa, post_filtered, pre_filtered, weights, reward, sgn, mask, delta)
             else:
-                factor = 1.0 - (np.einsum('ij,ji->i',weights, weights.T) / np.linalg.norm(weights,axis=1))
-                a = kappa * factor * post_filtered
-                sgn[:,:] = 1
+                rdelta = pre_filtered - reward
+                rdpos = rdelta > 0
+                if np.any(rdpos):
+                    rdelta[rdpos] /= rdelta[rdpos].max()
                 for i in range(weights.shape[0]):
-                    sgn[i,np.flatnonzero(pre_filtered < reward)] = -1
-                np.multiply(mask, pre_filtered, out=delta)
-                np.multiply(np.expand_dims(a, 1), delta, out=delta)
-                np.multiply(sgn, delta, out=delta)
-                np.multiply(reward, delta, out=delta)
-                delta_sum = np.add(delta, weights)
-                negz = np.nonzero(delta_sum <= 1e-6)
-                delta[negz] = 0.
-            
+                    factor = 1.0 - ((weights[i,:] * weights[i,:].T) / np.dot(weights[i,:], weights[i,:]))
+                    sgn[i,:] = rdelta
+                    delta[i,:] = sgn[i,:] * kappa * factor * pre_filtered * mask[i,:] * post_filtered[i] * reward
+
         return step_simrmsp
 
     

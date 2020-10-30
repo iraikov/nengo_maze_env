@@ -52,7 +52,7 @@ class HSP(LearningRuleType):
 @jit(nopython=True)
 def step_jit(kappa, post_filtered, pre_filtered, weights, sgn, mask, delta):
     for i in range(weights.shape[0]):
-        factor = 1.0 - (np.dot(weights[i,:], weights[i,:].T) / np.linalg.norm(weights[i,:]))
+        factor = 1.0 - ((weights[i,:] * weights[i,:].T) / np.dot(weights[i,:], weights[i,:]))
         lt = np.argwhere(pre_filtered < post_filtered[i])
         if len(lt) > 0:
             for j in range(lt.shape[0]):
@@ -150,25 +150,19 @@ class SimHSP(Operator):
         jit = self.jit
         
         def step_simhsp():
-            ## The code below is an optimized version of:
-            #for i in range(weights.shape[0]):
-            #    factor = 1.0 - (np.dot(weights[i,:], weights[i,:].T) / np.linalg.norm(weights[i,:]))
-            #    delta[i,:] = kappa * factor * pre_filtered * self.mask[i,:] * post_filtered[i]
 
             sgn[:,:] = 1
             if jit:
                 step_jit(kappa, post_filtered, pre_filtered, weights, sgn, mask, delta)
             else:
-                factor = 1.0 - (np.einsum('ij,ji->i',weights, weights.T) / np.linalg.norm(weights,axis=1))
-                a = kappa * factor * post_filtered
                 for i in range(weights.shape[0]):
-                    sgn[i,np.flatnonzero(pre_filtered < post_filtered[i])] = -1
-                np.multiply(mask, pre_filtered, out=delta)
-                np.multiply(np.expand_dims(a, 1), delta, out=delta)
-                np.multiply(sgn, delta, out=delta)
-                delta_sum = np.add(delta, weights)
-                negz = np.nonzero(delta_sum <= 1e-6)
-                delta[negz] = 0.
+                    factor = 1.0 - ((weights[i,:] * weights[i,:].T) / np.dot(weights[i,:], weights[i,:]))
+                    lt = np.argwhere(pre_filtered < post_filtered[i])
+                    if len(lt) > 0:
+                        for j in range(lt.shape[0]):
+                            sgn[i,j] = -1
+                    delta[i,:] = sgn[i,:] * kappa * factor * pre_filtered * mask[i,:] * post_filtered[i]
+
             
         return step_simhsp
 
