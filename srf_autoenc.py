@@ -56,7 +56,7 @@ for i in range(n_input):
 vlae = tf.keras.models.load_model("vlae_dataset_freiburg1",
                                   custom_objects={ 'flatten_binary_crossentropy': flatten_binary_crossentropy })
 
-n_sample = 300
+n_sample = 400
 encoder = vlae.get_layer("encoder")
 encoded_inputs = encoder.predict(all_data[:n_sample])
 
@@ -181,7 +181,7 @@ def trajectory_input(trajectory_inputs, t, centered=False):
 
 # In[ ]:
 
-N_Outputs = 50
+N_Outputs = 250
 N_Exc = len(exc_trajectory_inputs)
 N_Inh = n_inh
 
@@ -200,8 +200,12 @@ srf_network = PRF(exc_input_func = partial(trajectory_input, exc_trajectory_inpu
                   p_E = 0.3,
                   tau_E = 0.01,
                   tau_I = 0.03,
-                  isp_target_rate = 4.0,
+                  p_EE = 0.3,
+                  learning_rate_EE = 1e-4,
+                  tau_input = 0.1,
+                  isp_target_rate = 2.0,
                   label="Spatial receptive field network",
+                  use_gdhl = True,
                   seed=seed)
 
 with srf_network:

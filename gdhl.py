@@ -1,6 +1,7 @@
-
+import nengo
 from nengo.exceptions import SimulationError, ValidationError, BuildError
 from nengo.neurons import LIF, LIFRate
+from nengo.synapses import LinearFilter
 from nengo.builder import Builder, Operator, Signal
 from nengo.builder.neurons import SimNeurons
 from nengo.learning_rules import *
@@ -56,89 +57,46 @@ class GDHL(LearningRuleType):
     def _argreprs(self):
         return _remove_default_post_synapse(super()._argreprs, self.pre_synapse)
 
-@jit(nopython=True)
-def step_jit(sigma, eta, kappa, pre_filtered, post_filtered, ppre, ppost, weights, mask, dt, d_pre_filtered, d_post_filtered,
-             d_pre_pos, d_pre_neg, d_post_pos, d_post_neg, delta):
-
-    d_pre_filtered[:] = (pre_filtered - ppre) / dt
-    d_post_filtered[:] = (post_filtered - ppost) / dt
-
-    ppre[:] = pre_filtered
-    ppost[:] = post_filtered
-    
-    pre_pos_inds = np.argwhere(d_pre_filtered > 0)
-    pre_neg_inds = np.argwhere(d_pre_filtered <= 0)
-    post_neg_inds = np.argwhere(d_post_filtered <= 0)
-    post_pos_inds = np.argwhere(d_post_filtered > 0)
-
-    d_pre_pos.fill(0)
-    d_pre_neg.fill(0)
-    d_post_pos.fill(0)
-    d_post_neg.fill(0)
-    
-    d_pre_pos[pre_pos_inds] = d_pre_filtered[pre_pos_inds]
-    d_post_pos[post_pos_inds] = d_post_filtered[post_pos_inds]
-    d_pre_neg[pre_neg_inds] = -d_pre_filtered[pre_neg_inds]
-    d_post_neg[post_neg_inds] = -d_post_filtered[post_neg_inds]
-
-    for i in range(weights.shape[0]):
-        factor = 1.0 - ((weights[i,:] * weights[i,:].T) / (np.dot(weights[i,:], weights[i,:])))
-        dw = sigma['pp'] * d_pre_pos * d_post_pos[i] + \
-             sigma['pn'] * d_pre_pos * d_post_neg[i] + \
-             sigma['np'] * d_pre_neg * d_post_pos[i] + \
-             sigma['nn'] * d_pre_neg * d_post_neg[i] + \
-             eta['sp'] * pre_filtered * d_post_pos[i] + \
-             eta['sn'] * pre_filtered * d_post_neg[i] + \
-             eta['ps'] * d_pre_pos * post_filtered[i] + \
-             eta['pn'] * d_pre_neg * post_filtered[i]
-        delta[i,:] = kappa * factor * mask[i,:] * dw
-
         
-def step(sigma, eta, kappa, pre_filtered, post_filtered, ppre, ppost, weights, mask, dt, d_pre_filtered, d_post_filtered,
+@jit(nopython=True)
+def step(sigma_pp, sigma_pn, sigma_np, sigma_nn,
+         eta_sp, eta_sn, eta_ps, eta_ns,
+         kappa, pre_filtered, post_filtered,
+         d_pre_filtered, d_post_filtered, weights, mask, dt, 
          d_pre_pos, d_pre_neg, d_post_pos, d_post_neg, delta):
     
-    d_pre_filtered[:] = (pre_filtered - ppre) / dt
-    d_post_filtered[:] = (post_filtered - ppost) / dt
-
-    print("step %f" % dt)
-    print('ppre: %s' % str(ppre))
-    print('pre_filtered: %s' % str(pre_filtered))
-    print('d_pre_filtered: %s' % str(d_pre_filtered))
-
-    ppre[:] = pre_filtered
-    ppost[:] = post_filtered
-    
     pre_pos_inds = np.argwhere(d_pre_filtered > 0)
+    post_pos_inds = np.argwhere(d_post_filtered > 0)
     pre_neg_inds = np.argwhere(d_pre_filtered <= 0)
     post_neg_inds = np.argwhere(d_post_filtered <= 0)
-    post_pos_inds = np.argwhere(d_post_filtered > 0)
 
     d_pre_pos.fill(0)
     d_pre_neg.fill(0)
     d_post_pos.fill(0)
     d_post_neg.fill(0)
-    
-    d_pre_pos[pre_pos_inds] = d_pre_filtered[pre_pos_inds]
-    d_post_pos[post_pos_inds] = d_post_filtered[post_pos_inds]
-    d_pre_neg[pre_neg_inds] = -d_pre_filtered[pre_neg_inds]
-    d_post_neg[post_neg_inds] = -d_post_filtered[post_neg_inds]
+
+    for i in pre_pos_inds:
+        d_pre_pos[i] = d_pre_filtered[i]
+    for i in post_pos_inds:
+        d_post_pos[i] = d_post_filtered[i]
+    for i in pre_neg_inds:
+        d_pre_neg[i] = -d_pre_filtered[i]
+    for i in post_neg_inds:
+        d_post_neg[i] = -d_post_filtered[i]
 
     for i in range(weights.shape[0]):
-        dw = sigma['pp'] * d_pre_pos * d_post_pos[i] + \
-             sigma['pn'] * d_pre_pos * d_post_neg[i] + \
-             sigma['np'] * d_pre_neg * d_post_pos[i] + \
-             sigma['nn'] * d_pre_neg * d_post_neg[i] + \
-             eta['sp'] * pre_filtered * d_post_pos[i] + \
-             eta['sn'] * pre_filtered * d_post_neg[i] + \
-             eta['ps'] * d_pre_pos * post_filtered[i] + \
-             eta['ns'] * d_pre_neg * post_filtered[i]
-        print('dw: %s' % str(dw))
+        dw = sigma_pp * d_pre_pos * d_post_pos[i] + \
+             sigma_pn * d_pre_pos * d_post_neg[i] + \
+             sigma_np * d_pre_neg * d_post_pos[i] + \
+             sigma_nn * d_pre_neg * d_post_neg[i] + \
+             eta_sp * pre_filtered * d_post_pos[i] + \
+             eta_sn * pre_filtered * d_post_neg[i] + \
+             eta_ps * d_pre_pos * post_filtered[i] + \
+             eta_ns * d_pre_neg * post_filtered[i]
         delta[i,:] = kappa * mask[i,:] * dw
-        wv = weights[i,:] + delta[i,:]
-        factor = 1.0 - ((wv * wv.T) / (np.dot(wv, wv)))
-        print('factor: %s' % str(factor))
-        delta[i, :] = delta[i, :] * factor
-    print('delta: %s' % str(delta))
+        ww = delta[i, :] + weights[i,:]
+        factor = 1.0 - ((ww * ww.T) / np.dot(ww, ww))
+        delta[i,:] *= factor 
         
 
 # Builders for GDHL
@@ -183,25 +141,21 @@ class SimGDHL(Operator):
     4. updates ``[delta]``
     """
 
-    def __init__(self, pre_filtered, post_filtered, weights, delta, learning_rate, sigma, eta, jit, tag=None):
+    def __init__(self, pre_filtered, post_filtered, d_pre_filtered, d_post_filtered, weights, delta, learning_rate, sigma, eta, jit, tag=None):
         super(SimGDHL, self).__init__(tag=tag)
         self.learning_rate = learning_rate
         self.sigma = sigma
         self.eta = eta
         self.sets = []
         self.incs = []
-        self.reads = [pre_filtered, post_filtered, weights]
+        self.reads = [pre_filtered, post_filtered, d_pre_filtered, d_post_filtered, weights]
         self.updates = [delta]
         assert(np.all(np.linalg.norm(weights.initial_value, axis=1) > 0.))
         self.mask = np.logical_not(np.isclose(weights.initial_value, 0.))
-        self.d_pre_filtered = np.zeros((weights.initial_value.shape[1],))
-        self.d_post_filtered = np.zeros((weights.initial_value.shape[0],))
         self.d_pre_pos = np.zeros((weights.initial_value.shape[1],))
         self.d_pre_neg = np.zeros((weights.initial_value.shape[1],))
         self.d_post_pos = np.zeros((weights.initial_value.shape[0],))
         self.d_post_neg = np.zeros((weights.initial_value.shape[0],))
-        self.ppre = np.zeros((weights.initial_value.shape[1],))
-        self.ppost = np.zeros((weights.initial_value.shape[0],))
         self.jit = jit
         
     @property
@@ -215,10 +169,18 @@ class SimGDHL(Operator):
     @property
     def post_filtered(self):
         return self.reads[1]
+
+    @property
+    def d_pre_filtered(self):
+        return self.reads[2]
+
+    @property
+    def d_post_filtered(self):
+        return self.reads[3]
     
     @property
     def weights(self):
-        return self.reads[2]
+        return self.reads[4]
    
     @property
     def _descstr(self):
@@ -232,6 +194,8 @@ class SimGDHL(Operator):
     def make_step(self, signals, dt, rng):
         u = signals[self.pre_filtered]
         v = signals[self.post_filtered]
+        du = signals[self.d_pre_filtered]
+        dv = signals[self.d_post_filtered]
         delta = signals[self.delta]
         kappa = self.learning_rate * dt
         eta = self.eta
@@ -239,23 +203,32 @@ class SimGDHL(Operator):
         weights = signals[self.weights]
         mask = self.mask
         jit = self.jit
-        u0 = self.ppre
-        v0 = self.ppost
         d_pre_pos = self.d_pre_pos
         d_pre_neg = self.d_pre_neg
         d_post_pos = self.d_post_pos
         d_post_neg = self.d_post_neg
-        d_pre_filtered = self.d_pre_filtered
-        d_post_filtered = self.d_post_filtered
-
         
         def step_simgdhl():
+            sigma_pp = sigma['pp']
+            sigma_pn = sigma['pn']
+            sigma_np = sigma['np']
+            sigma_nn = sigma['nn']
+            
+            eta_sp = eta['sp']
+            eta_sn = eta['sn']
+            eta_ps = eta['ps']
+            eta_ns = eta['ns']
+            
             if jit:
-                step_jit(sigma, eta, kappa, u, v, u0, v0, weights, mask, dt, d_pre_filtered, d_post_filtered,
-                         d_pre_pos, d_pre_neg, d_post_pos, d_post_neg, delta)
-            else:
-                step(sigma, eta, kappa, u, v, u0, v0, weights, mask, dt, d_pre_filtered, d_post_filtered,
+                step(sigma_pp, sigma_pn, sigma_np, sigma_nn,
+                     eta_sp, eta_sn, eta_ps, eta_ns,
+                     kappa, u, v, du, dv, weights, mask, dt, 
                      d_pre_pos, d_pre_neg, d_post_pos, d_post_neg, delta)
+            else:
+                step.py_func(sigma_pp, sigma_pn, sigma_np, sigma_nn,
+                             eta_sp, eta_sn, eta_ps, eta_ns,
+                             kappa, u, v, du, dv, weights, mask, dt, 
+                             d_pre_pos, d_pre_neg, d_post_pos, d_post_neg, delta)
             
         return step_simgdhl
 
@@ -290,10 +263,15 @@ def build_gdhl(model, gdhl, rule):
     post_filtered = build_or_passthrough(model, gdhl.post_synapse, post_activities)
     weights = model.sig[conn]["weights"]
 
+    d_pre_filtered = build_or_passthrough(model, LinearFilter([1, 0], [1], method="backward_diff").combine(gdhl.pre_synapse), pre_activities)
+    d_post_filtered = build_or_passthrough(model, LinearFilter([1, 0], [1], method="backward_diff").combine(gdhl.post_synapse), post_activities)
+
     model.add_op(
         SimGDHL(
             pre_filtered,
             post_filtered,
+            d_pre_filtered,
+            d_post_filtered,
             weights,
             model.sig[rule]["delta"],
             learning_rate=gdhl.learning_rate,

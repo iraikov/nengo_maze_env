@@ -3,6 +3,7 @@ import numpy as np
 import nengo
 from hsp import HSP
 from isp import ISP
+from gdhl import GDHL
 import nengo_extras
 import nengo_extras.neurons
 
@@ -29,11 +30,15 @@ class PRF(nengo.Network):
                  tau_E = 0.01, # filter for excitatory inputs
                  tau_EI = 0.01, # filter for feedback inhibitory connections
                  tau_EE = 0.01, # filter for recurrent connections
+                 tau_input = 0.005, # filter for node input
                  learning_rate_I = 1e-6, # learning rate for homeostatic inhibitory plasticity
                  learning_rate_E = 1e-5, # learning rate for associative excitatory plasticity
                  learning_rate_EE = 1e-5, # learning rate for recurrent excitatory plasticity
                  isp_target_rate = 2.0, # target firing rate for inhibitory plasticity
                  connect_exc_inh_input = False,
+                 use_gdhl = False,
+                 gdhl_sigma = { 'pp': 0.1, 'np': -0.1, 'pn': -0.1, 'nn': 0.1 },
+                 gdhl_eta = { 'ps': 0.0, 'ns': 0.0, 'sp': 0.0, 'sn': 0.0 },
                  label = None,
                  seed = 0,
                  add_to_container = None,
@@ -98,12 +103,12 @@ class PRF(nengo.Network):
 
             if self.exc_input is not None:
                 nengo.Connection(self.exc_input, self.exc.neurons,
-                                synapse=nengo.Lowpass(0.01),
+                                synapse=nengo.Alpha(tau_input),
                                 transform=np.eye(n_excitatory))
             
             if self.inh_input is not None:
                 nengo.Connection(self.inh_input, self.inh.neurons,
-                                synapse=nengo.Lowpass(0.01),
+                                synapse=nengo.Alpha(tau_input),
                                 transform=np.eye(n_inhibitory))
 
             if connect_exc_inh_input and (self.exc_input is not None):
@@ -127,7 +132,13 @@ class PRF(nengo.Network):
                                            self.output.neurons, 
                                            transform=weights_initial_E,
                                            synapse=nengo.Alpha(tau_E),
-                                           learning_rule_type=HSP(learning_rate=learning_rate_E))
+                                           learning_rule_type=GDHL(sigma=gdhl_sigma, eta=gdhl_eta,
+                                                                   learning_rate=learning_rate_E,
+                                                                   pre_synapse=nengo.Lowpass(0.1),
+                                                                   post_synapse=nengo.Lowpass(0.1),
+                                                                   )
+                                               if use_gdhl else HSP(learning_rate=learning_rate_E))
+
                 
             self.conn_EI = nengo.Connection(self.output.neurons,
                                             self.inh.neurons,

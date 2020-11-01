@@ -7,8 +7,8 @@ import numpy as np
 import nengo
 from gdhl import GDHL
 
-sigma = { 'pp': 0.75, 'np': 0., 'pn': 0., 'nn': 0. }
-eta = { 'ps': 0.05, 'ns': 0., 'sp': 0., 'sn': 0. }
+sigma = { 'pp': 0.0, 'np': 0., 'pn': 0., 'nn': 0. }
+eta = { 'ps': 0., 'ns': 0., 'sp': 1., 'sn': -1. }
 
 seed = 21
 with nengo.Network(seed=seed) as net:
@@ -16,7 +16,7 @@ with nengo.Network(seed=seed) as net:
     b = nengo.Ensemble(1, 1)
     weights = np.ones((1, 10)) * 1e-3
     conn = nengo.Connection(
-        a.neurons, b.neurons, transform=weights, learning_rule_type=GDHL(sigma=sigma, eta=eta, jit=False, pre_synapse=nengo.Lowpass(0.005)),
+        a.neurons, b.neurons, transform=weights, learning_rule_type=GDHL(sigma=sigma, eta=eta, pre_synapse=nengo.Lowpass(0.005)),
     )
     
     p = nengo.Probe(conn, "weights")
