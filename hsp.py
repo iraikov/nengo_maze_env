@@ -32,11 +32,13 @@ class HSP(LearningRuleType):
     pre_synapse = SynapseParam("pre_synapse", default=Lowpass(tau=0.005), readonly=True)
     post_synapse = SynapseParam("post_synapse", default=None, readonly=True)
     jit = BoolParam("jit", default=True, readonly=True)
+    directed = BoolParam("directed", default=False, readonly=True)
 
     def __init__(self,
                  learning_rate=Default,
                  pre_synapse=Default,
                  post_synapse=Default,
+                 directed=Default,
                  jit=Default):
         super().__init__(learning_rate, size_in=0)
         self.pre_synapse = pre_synapse
@@ -44,19 +46,21 @@ class HSP(LearningRuleType):
             self.pre_synapse if post_synapse is Default else post_synapse
         )
         self.jit = jit
+        self.directed = directed
 
     @property
     def _argreprs(self):
         return _remove_default_post_synapse(super()._argreprs, self.pre_synapse)
 
 @jit(nopython=True)
-def step_jit(kappa, post_filtered, pre_filtered, weights, sgn, mask, delta):
+def step_jit(kappa, post_filtered, pre_filtered, weights, sgn, mask, delta, directed):
     for i in range(weights.shape[0]):
         factor = 1.0 - ((weights[i,:] * weights[i,:].T) / np.dot(weights[i,:], weights[i,:]))
-        lt = np.argwhere(pre_filtered < post_filtered[i])
-        if len(lt) > 0:
-            for j in range(lt.shape[0]):
-                sgn[i,j] = -1
+        if directed:
+            lt = np.argwhere(pre_filtered < post_filtered[i])
+            if len(lt) > 0:
+                for j in range(lt.shape[0]):
+                    sgn[i,j] = -1
         delta[i,:] = sgn[i,:] * kappa * factor * pre_filtered * mask[i,:] * post_filtered[i]
      
 
@@ -102,7 +106,7 @@ class SimHSP(Operator):
     4. updates ``[delta]``
     """
 
-    def __init__(self, pre_filtered, post_filtered, weights, delta, learning_rate, jit, tag=None):
+    def __init__(self, pre_filtered, post_filtered, weights, delta, learning_rate, directed, jit, tag=None):
         super(SimHSP, self).__init__(tag=tag)
         self.learning_rate = learning_rate
         self.sets = []
@@ -112,6 +116,7 @@ class SimHSP(Operator):
         assert(np.all(np.linalg.norm(weights.initial_value, axis=1) > 0.))
         self.mask = np.logical_not(np.isclose(weights.initial_value, 0.))
         self.sgn = np.ones(weights.initial_value.shape)
+        self.directed = directed
         self.jit = jit
         
     @property
@@ -147,20 +152,22 @@ class SimHSP(Operator):
         weights = signals[self.weights]
         mask = self.mask
         sgn = self.sgn
+        directed = self.directed
         jit = self.jit
         
         def step_simhsp():
 
             sgn[:,:] = 1
             if jit:
-                step_jit(kappa, post_filtered, pre_filtered, weights, sgn, mask, delta)
+                step_jit(kappa, post_filtered, pre_filtered, weights, sgn, mask, delta, directed)
             else:
                 for i in range(weights.shape[0]):
                     factor = 1.0 - ((weights[i,:] * weights[i,:].T) / np.dot(weights[i,:], weights[i,:]))
-                    lt = np.argwhere(pre_filtered < post_filtered[i])
-                    if len(lt) > 0:
-                        for j in range(lt.shape[0]):
-                            sgn[i,j] = -1
+                    if directed:
+                        lt = np.argwhere(pre_filtered < post_filtered[i])
+                        if len(lt) > 0:
+                            for j in range(lt.shape[0]):
+                                sgn[i,j] = -1
                     delta[i,:] = sgn[i,:] * kappa * factor * pre_filtered * mask[i,:] * post_filtered[i]
 
             
@@ -204,6 +211,7 @@ def build_hsp(model, hsp, rule):
             weights,
             model.sig[rule]["delta"],
             learning_rate=hsp.learning_rate,
+            directed=hsp.directed,
             jit=hsp.jit,
         )
     )

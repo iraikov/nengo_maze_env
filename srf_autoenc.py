@@ -67,8 +67,6 @@ def generate_input_ip(time_array, input_arrays, peak_rate=1., basis_function='ga
     for m, input_array in enumerate(input_arrays):
 
         norm_input_array = np.copy(input_array)
-        if np.min(norm_input_array) < 0.:
-            norm_input_array += np.abs(np.min(norm_input_array))
         norm_input_arrays.append(norm_input_array)
             
     max_norm_input_array = np.max([np.max(x) for x in norm_input_arrays])
@@ -127,7 +125,7 @@ def generate_const_input_ip(time_array, n, peak_rate=1., basis_function='inverse
 
 n_trials = 3
 peak_rate = 1.
-n_inh = 50
+n_inh = 200
 print("Generating inputs...")
 exc_input_ip_dict = generate_input_ip(input_time_array[:n_sample], encoded_inputs, peak_rate=peak_rate, n_trials=n_trials)
 #inh_input_ip_dict = generate_input_ip(input_time_array[:n_sample], encoded_inputs, peak_rate=peak_rate, n_trials=n_trials, nsample=n_inh)
@@ -164,30 +162,28 @@ def plot_input_rates(input_rate_ips, t_end, dt=0.001, num=None):
     plt.colorbar()
     plt.show()
         
-plot_input_rates(exc_trajectory_inputs, t_end)
-plot_input_rates(exc_trajectory_inputs, t_end, num=50)
+#plot_input_rates(exc_trajectory_inputs, t_end)
+#plot_input_rates(exc_trajectory_inputs, t_end, num=50)
 #plot_input_rates(inh_trajectory_inputs, t_end)
 
 # In[5]:
 
 
-def trajectory_input(trajectory_inputs, t, centered=False):
-    if centered:
-        result = np.asarray([ 2.*y(t) - 1. for y in trajectory_inputs ])
-    else:
-        result = np.asarray([ y(t) for y in trajectory_inputs ])
-    return np.clip(result, 0., None)
+def autoenc_input(input_ips, t, *args):
+    activity = np.asarray([ y(t) for y in input_ips ])
+    on = np.maximum(0., activity)
+    off = np.maximum(0., -activity)
+    return np.concatenate([on, off])
 
 
 # In[ ]:
 
-N_Outputs = 250
-N_Exc = len(exc_trajectory_inputs)
+N_Outputs = 50
+N_Exc = len(exc_trajectory_inputs)*2
 N_Inh = n_inh
 
 seed = 19
-srf_network = PRF(exc_input_func = partial(trajectory_input, exc_trajectory_inputs),
-                  #inh_input_func = partial(trajectory_input, inh_trajectory_inputs),
+srf_network = PRF(exc_input_func = partial(autoenc_input, exc_trajectory_inputs),
                   connect_exc_inh_input = True,
                   n_excitatory = N_Exc,
                   n_inhibitory = N_Inh,
@@ -200,12 +196,9 @@ srf_network = PRF(exc_input_func = partial(trajectory_input, exc_trajectory_inpu
                   p_E = 0.3,
                   tau_E = 0.01,
                   tau_I = 0.03,
-                  p_EE = 0.3,
-                  learning_rate_EE = 1e-4,
                   tau_input = 0.1,
                   isp_target_rate = 2.0,
                   label="Spatial receptive field network",
-                  use_gdhl = True,
                   seed=seed)
 
 with srf_network:
@@ -214,7 +207,8 @@ with srf_network:
     p_inh_rates = nengo.Probe(srf_network.inh.neurons, 'rates')
     p_inh_weights = nengo.Probe(srf_network.conn_I, 'weights')
     p_exc_weights = nengo.Probe(srf_network.conn_E, 'weights')
-    p_rec_weights = nengo.Probe(srf_network.conn_EE, 'weights')
+    if srf_network.conn_EE is not None:
+        p_rec_weights = nengo.Probe(srf_network.conn_EE, 'weights')
         
 with nengo.Simulator(srf_network, optimize=True) as sim:
     sim.run(np.max(t_end))

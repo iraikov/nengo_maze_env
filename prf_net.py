@@ -145,12 +145,14 @@ class PRF(nengo.Network):
                                             transform=weights_initial_EI,
                                             synapse=nengo.Alpha(tau_EI))
             
-
-            self.conn_EE = nengo.Connection(self.output.neurons, 
-                                            self.output.neurons, 
-                                            transform=weights_initial_EE,
-                                            synapse=nengo.Alpha(tau_EE),
-                                            learning_rule_type=HSP(learning_rate=learning_rate_EE))
+            if self.n_outputs > 1:
+                self.conn_EE = nengo.Connection(self.output.neurons, 
+                                                self.output.neurons, 
+                                                transform=weights_initial_EE,
+                                                synapse=nengo.Alpha(tau_EE),
+                                                learning_rule_type=HSP(learning_rate=learning_rate_EE))
+            else:
+                self.conn_EE = None
 
                              
     @property
