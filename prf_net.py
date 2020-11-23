@@ -58,16 +58,17 @@ class PRF(nengo.Network):
         assert(w_initial_EI > 0)
         assert(w_initial_EE > 0)
 
-        weights_dist_I = rng.normal(size=n_inhibitory*n_outputs).reshape((n_outputs, n_inhibitory))
+        weights_dist_I = rng.uniform(size=n_inhibitory*n_outputs).reshape((n_outputs, n_inhibitory))
         weights_initial_I = (weights_dist_I - weights_dist_I.min()) / (weights_dist_I.max() - weights_dist_I.min()) * w_initial_I
 
-        weights_dist_E = rng.normal(size=n_excitatory*n_outputs).reshape((n_outputs, n_excitatory))
-        weights_initial_E = (weights_dist_E - weights_dist_E.min()) / (weights_dist_E.max() - weights_dist_E.min()) * w_initial_E
+        weights_initial_E = np.zeros((n_outputs, n_excitatory))
         for i in range(n_outputs):
             sources_Exc = np.asarray(rng.choice(n_excitatory, round(p_E * n_excitatory), replace=False), dtype=np.int32)
             weights_initial_E[i, np.logical_not(np.in1d(range(n_excitatory), sources_Exc))] = 0.
+            w = rng.normal(size=len(sources_Exc))
+            weights_initial_E[i, sources_Exc] = (w - w.min()) / (w.max() - w.min()) * w_initial_E
 
-        weights_dist_EI = rng.normal(size=n_outputs*n_inhibitory).reshape((n_inhibitory, n_outputs))
+        weights_dist_EI = rng.uniform(size=n_outputs*n_inhibitory).reshape((n_inhibitory, n_outputs))
         weights_initial_EI = (weights_dist_EI - weights_dist_EI.min()) / (weights_dist_EI.max() - weights_dist_EI.min()) * w_initial_EI
         for i in range(n_outputs):
             targets_Inh = np.asarray(rng.choice(n_inhibitory, round(p_EI * n_inhibitory), replace=False), dtype=np.int32)
