@@ -30,6 +30,7 @@ class PRF(nengo.Network):
                  tau_E = 0.01, # filter for excitatory inputs
                  tau_EI = 0.01, # filter for feedback inhibitory connections
                  tau_EE = 0.01, # filter for recurrent connections
+                 tau_EI_Ext = 0.01, # filter for excitatory connection to inhibitory inputs (when connect_exc_inh_input = True)
                  tau_input = 0.005, # filter for node input
                  learning_rate_I = 1e-6, # learning rate for homeostatic inhibitory plasticity
                  learning_rate_E = 1e-5, # learning rate for associative excitatory plasticity
@@ -118,8 +119,8 @@ class PRF(nengo.Network):
                     sources_Exc = np.asarray(rng.choice(n_excitatory, round(p_EI_Ext * n_excitatory), replace=False), dtype=np.int32)
                     weights_dist_EI_Ext[i, np.logical_not(np.in1d(range(n_excitatory), sources_Exc))] = 0.
                 nengo.Connection(self.exc.neurons, self.inh.neurons,
-                                synapse=nengo.Lowpass(0.01),
-                                transform=weights_dist_EI_Ext)
+                                 synapse=nengo.Alpha(tau_EI_Ext),
+                                 transform=weights_dist_EI_Ext)
                 
             
             self.conn_I = nengo.Connection(self.inh.neurons,
