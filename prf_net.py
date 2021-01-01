@@ -17,26 +17,34 @@ class PRF(nengo.Network):
                  n_outputs = 50,
                  n_inhibitory = 250,
                  n_excitatory = 1000,
+                 w_input = 1, # external input weights
                  w_initial_I = -1e-2, # baseline inhibitory synaptic weight
                  w_initial_E =  1e-1, # baseline excitatory synaptic weight
                  w_initial_EI =  1e-3, # baseline feedback inhibition synaptic weight
                  w_initial_EE =  1e-3, # baseline recurrent excitatory synaptic weight
+                 w_initial_E_Fb =  1e-3, # baseline output to excitatory synaptic weight (when connect_exc_fb = True)
                  w_EI_Ext = 1e-3, # weight of excitatory connection to inhibitory inputs (when connect_exc_inh_input = True)
+                 w_II = -1e-3, # weight of inhibitory to inhibitory connections (when connect_inh_inh_input = True)
                  p_E = 0.4, # uniform probability of connection of excitatory inputs to outputs
                  p_EI = 0.4, # uniform probability of feedback connections to inhibitory cells
                  p_EE = 0.1, # uniform probability of recurrent connections
                  p_EI_Ext = 0.25, # uniform probability of excitatory connection to inhibitory inputs (when connect_exc_inh_input = True)
+                 p_E_Fb = 0.05, # uniform probability of outputs to excitatory inputs (when connect_exc_fb = True)
+                 p_II = 0.05, # uniform probability of inhibitory to inhibitory inputs (when connect_inh_inh = True)
                  tau_I = 0.03, # filter for inhibitory inputs
                  tau_E = 0.01, # filter for excitatory inputs
                  tau_EI = 0.01, # filter for feedback inhibitory connections
                  tau_EE = 0.01, # filter for recurrent connections
                  tau_EI_Ext = 0.01, # filter for excitatory connection to inhibitory inputs (when connect_exc_inh_input = True)
+                 tau_E_Fb = 0.01, # filter for output connection to excitatory inputs (when connect_exc_fb  = True)
                  tau_input = 0.005, # filter for node input
                  learning_rate_I = 1e-6, # learning rate for homeostatic inhibitory plasticity
                  learning_rate_E = 1e-5, # learning rate for associative excitatory plasticity
                  learning_rate_EE = 1e-5, # learning rate for recurrent excitatory plasticity
                  isp_target_rate = 2.0, # target firing rate for inhibitory plasticity
                  connect_exc_inh_input = False,
+                 connect_inh_inh_input = False,
+                 connect_exc_fb = False,
                  use_gdhl = False,
                  gdhl_sigma = { 'pp': 0.1, 'np': -0.1, 'pn': -0.1, 'nn': 0.1 },
                  gdhl_eta = { 'ps': 0.0, 'ns': 0.0, 'sp': 0.0, 'sn': 0.0 },
@@ -58,6 +66,7 @@ class PRF(nengo.Network):
         assert(w_initial_E > 0)
         assert(w_initial_EI > 0)
         assert(w_initial_EE > 0)
+        assert(w_initial_E_Fb > 0)
 
         weights_dist_I = rng.uniform(size=n_inhibitory*n_outputs).reshape((n_outputs, n_inhibitory))
         weights_initial_I = (weights_dist_I - weights_dist_I.min()) / (weights_dist_I.max() - weights_dist_I.min()) * w_initial_I
@@ -106,12 +115,12 @@ class PRF(nengo.Network):
             if self.exc_input is not None:
                 nengo.Connection(self.exc_input, self.exc.neurons,
                                 synapse=nengo.Alpha(tau_input),
-                                transform=np.eye(n_excitatory))
+                                transform=np.eye(n_excitatory) * w_input)
             
             if self.inh_input is not None:
                 nengo.Connection(self.inh_input, self.inh.neurons,
                                 synapse=nengo.Alpha(tau_input),
-                                transform=np.eye(n_inhibitory))
+                                transform=np.eye(n_inhibitory) * w_input)
 
             if connect_exc_inh_input and (self.exc_input is not None):
                 weights_dist_EI_Ext = rng.uniform(size=n_excitatory*n_inhibitory).reshape((n_inhibitory, n_excitatory)) * w_EI_Ext
@@ -129,6 +138,16 @@ class PRF(nengo.Network):
                                            synapse=nengo.Alpha(tau_I),
                                            learning_rule_type=ISP(learning_rate=learning_rate_I,
                                                                   rho0=isp_target_rate))
+            self.conn_II = None
+            if connect_inh_inh_input:
+                weights_dist_II = np.ones((n_inhibitory, n_inhibitory)) * w_II
+                for i in range(n_inhibitory):
+                    sources_Inh = np.asarray(rng.choice(n_inhibitory, round(p_II * n_inhibitory), replace=False), dtype=np.int32)
+                    weights_dist_II[i, np.logical_not(np.in1d(range(n_inhibitory), sources_Inh))] = 0.
+                self.conn_II = nengo.Connection(self.inh.neurons,
+                                                self.inh.neurons,
+                                                transform=weights_dist_II,
+                                                synapse=nengo.Alpha(tau_I))
             
             self.conn_E = nengo.Connection(self.exc.neurons,
                                            self.output.neurons, 
@@ -146,6 +165,26 @@ class PRF(nengo.Network):
                                             self.inh.neurons,
                                             transform=weights_initial_EI,
                                             synapse=nengo.Alpha(tau_EI))
+
+            self.conn_E_Fb = None
+            if connect_exc_fb:
+                weights_initial_E_Fb = np.zeros((n_excitatory, n_outputs))
+                for i in range(n_excitatory):
+                    sources_Out = np.asarray(rng.choice(n_outputs, round(p_E_Fb * n_outputs), replace=False), dtype=np.int32)
+                    weights_initial_E_Fb[i, np.logical_not(np.in1d(range(n_outputs), sources_Out))] = 0.
+                    w = rng.normal(size=len(sources_Out))
+                    weights_initial_E_Fb[i, sources_Out] = (w - w.min()) / (w.max() - w.min()) * w_initial_E_Fb
+                self.conn_E_Fb = nengo.Connection(self.output.neurons,
+                                                  self.exc.neurons, 
+                                                  transform=weights_initial_E_Fb,
+                                                  synapse=nengo.Alpha(tau_E_Fb),
+                                                  learning_rule_type=GDHL(sigma=gdhl_sigma, eta=gdhl_eta,
+                                                                        learning_rate=learning_rate_E,
+                                                                        pre_synapse=nengo.Lowpass(0.1),
+                                                                        post_synapse=nengo.Lowpass(0.1),
+                                                                        )
+                                                  if use_gdhl else HSP(learning_rate=learning_rate_E))
+                
             
             if self.n_outputs > 1:
                 self.conn_EE = nengo.Connection(self.output.neurons, 
