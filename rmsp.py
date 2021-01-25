@@ -52,16 +52,13 @@ class RMSP(LearningRuleType):
     def _argreprs(self):
         return _remove_default_post_synapse(super()._argreprs, self.pre_synapse)
 
-#@jit(nopython=True)
+    
+@jit(nopython=True)
 def step_jit(kappa, post_filtered, pre_filtered, weights, reward, sgn, mask, delta):
     rdelta = pre_filtered - reward
-    rdpos = rdelta > 0
-    if np.any(rdpos):
-        rdelta[rdpos] /= rdelta[rdpos].max()
     for i in range(weights.shape[0]):
-        factor = 1.0 - ((weights[i,:] * weights[i,:].T) / np.dot(weights[i,:], weights[i,:]))
-        sgn[i,:] = rdelta
-        delta[i,:] = sgn[i,:] * kappa * factor * pre_filtered * mask[i,:] * post_filtered[i] * reward
+        factor = (1.0 - ((weights[i,:] * weights[i,:].T) / np.dot(weights[i,:], weights[i,:]))) * reward
+        delta[i,:] = rdelta * kappa * factor * pre_filtered * mask[i,:] * post_filtered[i]
 
 # Builders for RMSP
 class SimRMSP(Operator):
@@ -167,13 +164,9 @@ class SimRMSP(Operator):
                 step_jit(kappa, post_filtered, pre_filtered, weights, reward, sgn, mask, delta)
             else:
                 rdelta = pre_filtered - reward
-                rdpos = rdelta > 0
-                if np.any(rdpos):
-                    rdelta[rdpos] /= rdelta[rdpos].max()
                 for i in range(weights.shape[0]):
-                    factor = 1.0 - ((weights[i,:] * weights[i,:].T) / np.dot(weights[i,:], weights[i,:]))
-                    sgn[i,:] = rdelta
-                    delta[i,:] = sgn[i,:] * kappa * factor * pre_filtered * mask[i,:] * post_filtered[i] * reward
+                    factor = (1.0 - ((weights[i,:] * weights[i,:].T) / np.dot(weights[i,:], weights[i,:]))) * reward
+                    delta[i,:] = rdelta * kappa * factor * pre_filtered * mask[i,:] * post_filtered[i]
 
         return step_simrmsp
 
