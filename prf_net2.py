@@ -75,7 +75,7 @@ class PRF(nengo.Network):
         if weights_I is not None:
             weights_initial_I = weights_I
         else:
-            weights_initial_I = rng.uniform(size=n_inhibitory*n_outputs).reshape((n_outputs, n_inhibitory))
+            weights_dist_I = rng.uniform(size=n_inhibitory*n_outputs).reshape((n_outputs, n_inhibitory))
             weights_initial_I = (weights_dist_I - weights_dist_I.min()) / (weights_dist_I.max() - weights_dist_I.min()) * w_initial_I
 
         if weights_E is not None:
@@ -97,13 +97,13 @@ class PRF(nengo.Network):
         if weights_EE is not None:
             weights_initial_EE = weights_EE
         else:
-            weights_dist_EE = rng.normal(size=n_excitatory*n_excitatory).reshape((n_excitatory, n_excitatory))
+            weights_dist_EE = rng.normal(size=n_outputs*n_outputs).reshape((n_outputs, n_outputs))
             weights_initial_EE = (weights_dist_EE - weights_dist_EE.min()) / (weights_dist_EE.max() - weights_dist_EE.min()) * w_initial_EE
-            for i in range(n_excitatory):
-                target_choices = np.asarray([ j for j in range(n_excitatory) if i != j ])
-                targets_Out = np.asarray(rng.choice(target_choices, round(p_EE * n_excitatory), replace=False),
+            for i in range(n_outputs):
+                target_choices = np.asarray([ j for j in range(n_outputs) if i != j ])
+                targets_Out = np.asarray(rng.choice(target_choices, round(p_EE * n_outputs), replace=False),
                                         dtype=np.int32)
-                weights_initial_EE[i, np.logical_not(np.in1d(range(n_excitatory), targets_Out))] = 0.
+                weights_initial_EE[i, np.logical_not(np.in1d(range(n_outputs), targets_Out))] = 0.
 
         with self:
 
@@ -137,6 +137,9 @@ class PRF(nengo.Network):
 
             if connect_exc_inh_input and (self.exc_input is not None):
                 weights_dist_EI_Ext = rng.uniform(size=n_excitatory*n_inhibitory).reshape((n_inhibitory, n_excitatory)) * w_EI_Ext
+                for i in range(n_inhibitory):
+                    sources_Exc = np.asarray(rng.choice(n_excitatory, round(p_EI_Ext * n_excitatory), replace=False), dtype=np.int32)
+                    weights_dist_EI_Ext[i, np.logical_not(np.in1d(range(n_excitatory), sources_Exc))] = 0.
                 nengo.Connection(self.exc.neurons, self.inh.neurons,
                                  synapse=nengo.Alpha(tau_EI_Ext),
                                  transform=weights_dist_EI_Ext)
@@ -199,9 +202,9 @@ class PRF(nengo.Network):
                                                   if use_gdhl else HSP(learning_rate=learning_rate_E))
                 
             
-            if self.n_exc > 1:
-                self.conn_EE = nengo.Connection(self.exc.neurons, 
-                                                self.exc.neurons, 
+            if self.n_outputs > 1:
+                self.conn_EE = nengo.Connection(self.output.neurons, 
+                                                self.output.neurons, 
                                                 transform=weights_initial_EE,
                                                 synapse=nengo.Alpha(tau_EE),
                                                 learning_rule_type=HSP(learning_rate=learning_rate_EE))
@@ -215,6 +218,7 @@ class PRF(nengo.Network):
         cfg = nengo.Config(nengo.Ensemble, nengo.Connection)
         cfg[nengo.Ensemble].update(
             {
+            "neuron_type": nengo.RectifiedLinear(),
             "radius": 1,
             "intercepts": nengo.dists.Choice([0.1]*self.dimensions),
             "max_rates": nengo.dists.Choice([20])
@@ -229,6 +233,7 @@ class PRF(nengo.Network):
         cfg = nengo.Config(nengo.Ensemble, nengo.Connection)
         cfg[nengo.Ensemble].update(
             {
+            "neuron_type": nengo.RectifiedLinear(),
             "radius": 1,
             "intercepts": nengo.dists.Choice([0.1]*self.dimensions),
             "max_rates": nengo.dists.Choice([40])
@@ -243,6 +248,7 @@ class PRF(nengo.Network):
         cfg = nengo.Config(nengo.Ensemble, nengo.Connection)
         cfg[nengo.Ensemble].update(
             {
+            "neuron_type": nengo.LIF(),
             "radius": 1,
             "intercepts": nengo.dists.Choice([0.1]*self.dimensions),
             "max_rates": nengo.dists.Choice([40])

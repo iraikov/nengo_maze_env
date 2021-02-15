@@ -208,23 +208,20 @@ srf_network = PRF(exc_input_func = partial(trajectory_input, exc_trajectory_inpu
                   n_inhibitory = N_Inh,
                   n_outputs = N_Outputs,
                   label="Spatial receptive field network",
-                  use_gdhl = True,
                   seed=seed)
 
 with srf_network:
-    p_output_spikes = nengo.Probe(srf_network.output.neurons, 'spikes')
+    p_output_spikes = nengo.Probe(srf_network.output.neurons)
     p_inh_weights = nengo.Probe(srf_network.conn_I, 'weights')
     p_exc_weights = nengo.Probe(srf_network.conn_E, 'weights')
     p_rec_weights = nengo.Probe(srf_network.conn_EE, 'weights')
-    p_exc_rates = nengo.Probe(srf_network.exc.neurons, 'rates')
-    p_inh_rates = nengo.Probe(srf_network.inh.neurons, 'rates')
+    p_exc_rates = nengo.Probe(srf_network.exc.neurons)
+    p_inh_rates = nengo.Probe(srf_network.inh.neurons)
     
 with nengo.Simulator(srf_network, optimize=True) as sim:
     sim.run(np.max(trj_t))
     
 output_spikes = sim.data[p_output_spikes]
-np.save("srf_output_spikes", np.asarray(output_spikes, dtype=np.float32))
-np.save("srf_time_range", np.asarray(sim.trange(), dtype=np.float32))
 output_rates = rates_kernel(sim.trange(), output_spikes, tau=0.1)
 #output_rates = sim.data[p_output_rates]
 #plot_spikes(sim.trange(), sim.data[p_inh_rates][0,:])
