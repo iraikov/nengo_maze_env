@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
 import scipy.interpolate
-from scipy.interpolate import Rbf, CubicSpline
+from scipy.interpolate import Rbf, Akima1DInterpolator
 from rbf.pde.nodes import disperse, poisson_disc_nodes
 import nengo
 from nengo_extras.plot_spikes import (
@@ -152,7 +152,7 @@ for m in exc_input_rates_dict:
         input_rates = exc_input_rates_dict[m][i](trj_x, trj_y)
         input_rates[np.isclose(input_rates, 0., atol=1e-4, rtol=1e-4)] = 0.
         exc_trajectory_input_rates[m][i] = input_rates
-        input_rates_ip = CubicSpline(trj_t, input_rates)
+        input_rates_ip = Akima1DInterpolator(trj_t, input_rates)
         exc_trajectory_inputs.append(input_rates_ip)
         
 for m in inh_input_rates_dict:
@@ -160,7 +160,7 @@ for m in inh_input_rates_dict:
         input_rates = inh_input_rates_dict[m][i](trj_x, trj_y)
         input_rates[np.isclose(input_rates, 0., atol=1e-4, rtol=1e-4)] = 0.
         inh_trajectory_input_rates[m][i] = input_rates
-        input_rates_ip = CubicSpline(trj_t, input_rates)
+        input_rates_ip = Akima1DInterpolator(trj_t, input_rates)
         inh_trajectory_inputs.append(input_rates_ip)
             
 
@@ -178,8 +178,8 @@ def plot_input_rates(input_rates_dict):
         plt.colorbar()
         plt.show()
         
-plot_input_rates(exc_input_rates_dict)
-plot_input_rates(inh_input_rates_dict)
+#plot_input_rates(exc_input_rates_dict)
+#plot_input_rates(inh_input_rates_dict)
 
 # In[5]:
 
@@ -207,14 +207,15 @@ srf_network = PRF(exc_input_func = partial(trajectory_input, exc_trajectory_inpu
                   n_excitatory = N_Exc,
                   n_inhibitory = N_Inh,
                   n_outputs = N_Outputs,
+                  connect_exc_fb = True,
                   label="Spatial receptive field network",
                   seed=seed)
 
 with srf_network:
     p_output_spikes = nengo.Probe(srf_network.output.neurons)
-    p_inh_weights = nengo.Probe(srf_network.conn_I, 'weights')
-    p_exc_weights = nengo.Probe(srf_network.conn_E, 'weights')
-    p_rec_weights = nengo.Probe(srf_network.conn_EE, 'weights')
+    p_inh_weights = nengo.Probe(srf_network.conn_I, 'weights', sample_every=1.0)
+    p_exc_weights = nengo.Probe(srf_network.conn_E, 'weights', sample_every=1.0)
+    p_rec_weights = nengo.Probe(srf_network.conn_EE, 'weights', sample_every=1.0)
     p_exc_rates = nengo.Probe(srf_network.exc.neurons)
     p_inh_rates = nengo.Probe(srf_network.inh.neurons)
     
@@ -222,6 +223,8 @@ with nengo.Simulator(srf_network, optimize=True) as sim:
     sim.run(np.max(trj_t))
     
 output_spikes = sim.data[p_output_spikes]
+np.save("srf_output_spikes", np.asarray(output_spikes, dtype=np.float32))
+np.save("srf_time_range", np.asarray(sim.trange(), dtype=np.float32))
 output_rates = rates_kernel(sim.trange(), output_spikes, tau=0.1)
 #output_rates = sim.data[p_output_rates]
 #plot_spikes(sim.trange(), sim.data[p_inh_rates][0,:])
