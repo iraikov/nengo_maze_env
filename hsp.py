@@ -9,7 +9,10 @@ from nengo.params import (NumberParam, BoolParam)
 from nengo.builder.operator import DotInc, ElementwiseInc, Copy, Reset
 from nengo.connection import LearningRule
 from nengo.ensemble import Ensemble, Neurons
-from numba import jit
+import numba
+from numba import jit, prange
+
+numba.config.THREADING_LAYER = 'threadsafe'
 
 # Creates new learning rule for Hebbian synaptic plasticity (HSP).
 # Based on the paper:
@@ -52,16 +55,16 @@ class HSP(LearningRuleType):
     def _argreprs(self):
         return _remove_default_post_synapse(super()._argreprs, self.pre_synapse)
 
-@jit(nopython=True)
+@jit(nopython=True, parallel=True, fastmath=True)
 def step_jit(kappa, post_filtered, pre_filtered, weights, sgn, mask, delta, directed):
-    for i in range(weights.shape[0]):
+    for i in prange(weights.shape[0]):
         factor = 1.0 - ((weights[i,:] * weights[i,:].T) / np.dot(weights[i,:], weights[i,:]))
         if directed:
             lt = np.argwhere(pre_filtered < post_filtered[i])
             if len(lt) > 0:
                 for j in range(lt.shape[0]):
                     sgn[i,j] = -1
-        delta[i,:] = sgn[i,:] * kappa * factor * pre_filtered * mask[i,:] * post_filtered[i]
+        delta[i,:] = sgn[i,:] * kappa * factor * pre_filtered * mask[i, :] * post_filtered[i]
      
 
 # Builders for HSP

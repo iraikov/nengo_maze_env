@@ -6,6 +6,7 @@ from isp import ISP
 from gdhl import GDHL
 import nengo_extras
 import nengo_extras.neurons
+from scipy.sparse import csc_matrix
 
 ## Plastic receptive fields network
 
@@ -161,7 +162,8 @@ class PRF(nengo.Network):
                                                     transform=weights_dist_II,
                                                     synapse=nengo.Alpha(tau_I))
                                                                                                                                     
-            
+            #csc_E = csc_matrix(weights_initial_E)
+            #transform_E = nengo.Sparse(shape=(n_outputs, n_excitatory), init=csc_E)
             self.conn_E = nengo.Connection(self.exc.neurons,
                                            self.output.neurons, 
                                            transform=weights_initial_E,

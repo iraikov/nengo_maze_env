@@ -9,7 +9,7 @@ from nengo.params import (NumberParam, BoolParam)
 from nengo.builder.operator import DotInc, ElementwiseInc, Copy, Reset
 from nengo.connection import LearningRule
 from nengo.ensemble import Ensemble, Neurons
-from numba import jit
+from numba import jit, prange
 
 # Creates new learning rule for reward-modulated synaptic plasticity (RMSP).
 # Based on the paper:
@@ -53,10 +53,10 @@ class RMSP(LearningRuleType):
         return _remove_default_post_synapse(super()._argreprs, self.pre_synapse)
 
     
-@jit(nopython=True)
+@jit(nopython=True, parallel=True, fastmath=True)
 def step_jit(kappa, post_filtered, pre_filtered, weights, reward, sgn, mask, delta):
     rdelta = pre_filtered - reward
-    for i in range(weights.shape[0]):
+    for i in prange(weights.shape[0]):
         factor = (1.0 - ((weights[i,:] * weights[i,:].T) / np.dot(weights[i,:], weights[i,:]))) * reward
         delta[i,:] = rdelta * kappa * factor * pre_filtered * mask[i,:] * post_filtered[i]
 
