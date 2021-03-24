@@ -5,10 +5,13 @@ from nengo.builder import Builder, Operator, Signal
 from nengo.builder.neurons import SimNeurons
 from nengo.learning_rules import *
 from nengo.builder.learning_rules import *
-from nengo.params import (NumberParam)
+from nengo.params import (NumberParam, BoolParam)
 from nengo.builder.operator import DotInc, ElementwiseInc, Copy, Reset
 from nengo.connection import LearningRule
 from nengo.ensemble import Ensemble, Neurons
+import numba
+from numba import jit, prange
+
 
 # Creates new learning rule for inhibitory plasticity (ISP).
 # Based on the paper:
@@ -32,24 +35,35 @@ class ISP(LearningRuleType):
     rho0 = NumberParam("rho0", low=0, readonly=True, default=10.)
     pre_synapse = SynapseParam("pre_synapse", default=Lowpass(tau=0.02), readonly=True)
     post_synapse = SynapseParam("post_synapse", default=None, readonly=True)
+    jit = BoolParam("jit", default=True, readonly=True)
 
     def __init__(self,
                  learning_rate=Default,
                  rho0=Default,
                  pre_synapse=Default,
                  post_synapse=Default,
-                 theta_synapse=Default):
+                 theta_synapse=Default,
+                 jit=Default):
         super().__init__(learning_rate, size_in=0)
         self.rho0 = rho0
         self.pre_synapse = pre_synapse
         self.post_synapse = (
             self.pre_synapse if post_synapse is Default else post_synapse
         )
+        self.jit = jit
 
     @property
     def _argreprs(self):
         return _remove_default_post_synapse(super()._argreprs, self.pre_synapse)
 
+@jit(nopython=True)
+def step_jit(kappa, rho0, post_filtered, pre_filtered, weights, mask, delta):
+    for i in prange(weights.shape[0]):
+        delta[i,:] = -kappa * pre_filtered * mask[i,:] * (post_filtered[i] - rho0)
+        delta_sum = np.add(delta[i,:], weights[i,:]).reshape((-1,))
+        sat = np.nonzero(delta_sum >= 0)[0]
+        delta[i][sat] = 0.
+    
 
 # Builders for ISP
 class SimISP(Operator):
@@ -98,7 +112,7 @@ class SimISP(Operator):
     4. updates ``[delta]``
     """
 
-    def __init__(self, pre_filtered, post_filtered, weights, rho0, delta, learning_rate, tag=None):
+    def __init__(self, pre_filtered, post_filtered, weights, rho0, delta, learning_rate, jit, tag=None):
         super(SimISP, self).__init__(tag=tag)
         self.learning_rate = learning_rate
         self.rho0 = rho0
@@ -107,7 +121,8 @@ class SimISP(Operator):
         self.incs = []
         self.reads = [pre_filtered, post_filtered, weights]
         self.updates = [delta]
-
+        self.jit = jit
+        
     @property
     def delta(self):
         return self.updates[0]
@@ -141,19 +156,22 @@ class SimISP(Operator):
         kappa = self.learning_rate * dt
         rho0 = self.rho0
         mask = self.mask
+        jit = self.jit
         
         def step_simisp():
             ## The code below is an optimized version of the following:
             #for i in range(weights.shape[0]):
             #    delta[i,:] = -kappa * pre_filtered * mask[i,:] * (post_filtered[i] - rho0)
             #    delta_sum = np.add(delta[i,:], weights[i,:])
-
-            a = -kappa * (post_filtered - rho0)
-            np.multiply(self.mask, pre_filtered, out=delta)
-            np.multiply(a[:, np.newaxis], delta, out=delta)
-            delta_sum = np.add(delta, weights)
-            sat = np.nonzero(np.logical_or(delta_sum >= 0, delta_sum < -1))
-            delta[sat] = 0.
+            if jit:
+                step_jit(kappa, rho0, post_filtered, pre_filtered, weights, mask, delta)
+            else:
+                a = -kappa * (post_filtered - rho0)
+                np.multiply(self.mask, pre_filtered, out=delta)
+                np.multiply(a[:, np.newaxis], delta, out=delta)
+                delta_sum = np.add(delta, weights)
+                sat = np.nonzero(np.logical_or(delta_sum >= 0, delta_sum < -1))
+                delta[sat] = 0.
             
         return step_simisp
 
@@ -196,6 +214,7 @@ def build_isp(model, isp, rule):
             isp.rho0,
             model.sig[rule]["delta"],
             learning_rate=isp.learning_rate,
+            jit=isp.jit
         )
     )
 

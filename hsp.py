@@ -55,16 +55,20 @@ class HSP(LearningRuleType):
     def _argreprs(self):
         return _remove_default_post_synapse(super()._argreprs, self.pre_synapse)
 
-@jit(nopython=True, parallel=True, fastmath=True)
+@jit(nopython=True, parallel=True)
 def step_jit(kappa, post_filtered, pre_filtered, weights, sgn, mask, delta, directed):
     for i in prange(weights.shape[0]):
-        factor = 1.0 - ((weights[i,:] * weights[i,:].T) / np.dot(weights[i,:], weights[i,:]))
+        weights_i = weights[i]
+        idxs = np.argwhere(mask[i,:]).ravel()
+        factor = 1.0 - ((weights_i[idxs] * weights_i[idxs].T) / np.dot(weights_i[idxs], weights_i[idxs]))
         if directed:
             lt = np.argwhere(pre_filtered < post_filtered[i])
             if len(lt) > 0:
                 for j in range(lt.shape[0]):
                     sgn[i,j] = -1
-        delta[i,:] = sgn[i,:] * kappa * factor * pre_filtered * mask[i, :] * post_filtered[i]
+        sgn_i = sgn[i]
+        dw = sgn_i[idxs] * kappa * factor * pre_filtered[idxs] * post_filtered[i]
+        delta[i][idxs] = dw
      
 
 # Builders for HSP
