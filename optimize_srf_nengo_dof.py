@@ -7,26 +7,40 @@ from prf_net import PRF
 from ei_net import EI
 from hsp import HSP
 from isp import ISP
-import distgfs
+from dmosopt import dmosopt
 import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-input_matrix = np.load("srf_nengo_dof_input_matrix.npy")
 
-def modulation_index(rates):
-    mod_idxs = []
+
+def obj_modulation_depth(rates):
+    mod_depths = []
     for i in range(rates.shape[1]):
         rates_i = rates[:, i]
-        peak_pctile = np.percentile(rates_i, 90)
+        peak_pctile = np.percentile(rates_i, 80)
         med_pctile = np.percentile(rates_i, 50)
         peak_idxs = np.argwhere(rates_i >= peak_pctile)
         med_idxs = np.argwhere(rates_i <= med_pctile)
-        mod_index = np.sum(rates_i[peak_idxs]) / np.max(np.sum(rates_i[med_idxs]), 1e-4)
-        mod_idxs.append(mod_index)
-        logger.info(f"modulation_index {i}: peak_pctile: {peak_pctile} med_pctile: {med_pctile} mod_index: {mod_index}")
-    res = np.mean(mod_idxs)
+        mean_peak = np.mean(rates_i[peak_idxs])
+        mean_med = np.mean(rates_i[med_idxs])
+        mod_depth = (mean_peak - mean_med) ** 2.
+        mod_depths.append(mod_depth)
+        #logger.info(f"modulation_depth {i}: peak_pctile: {peak_pctile} med_pctile: {med_pctile} mod_depth: {mod_depth}")
+    res = -np.mean(mod_depths)
     return res
+
+def obj_fraction_active(rates, target=0.05):
+    n = rates.shape[1]
+    bin_fraction_active = []
+    for i in range(rates.shape[0]):
+        rates_i = rates[i, :]
+        a = len(np.argwhere(rates_i >= 1.0))
+        bin_fraction_active.append(float(a) / float(n))
+        #logger.info(f"fraction_active {i}: a: {a} n: {n} fraction: {float(a) / float(n)}")
+    res = (np.mean(bin_fraction_active) - target)**2
+    return res
+
         
 
 
@@ -34,12 +48,12 @@ def array_input(input_matrix, dt, t, *args):
     i = int(t/dt)
     if i >= input_matrix.shape[0]:
         i = -1
-    return input_matrix[i,:]
+    return input_matrix[:,i]
 
             
 def eval_srf_net(input_matrix, params):
 
-    N_inputs = train_data.shape[0]
+    N_inputs = input_matrix.shape[0]
 
     N_outputs_srf = params['N_outputs_srf']
     N_exc_srf = N_inputs
@@ -49,7 +63,7 @@ def eval_srf_net(input_matrix, params):
     N_inh_place = params['N_inh_place']
 
     dt = 0.001
-    t_end = train_data.shape[1] * dt
+    t_end = input_matrix.shape[1] * dt
 
     srf_place_network = nengo.Network(label="Learning with spatial receptive fields", seed=params['seed'])
     rng = np.random.RandomState(seed=params['seed'])
@@ -58,7 +72,7 @@ def eval_srf_net(input_matrix, params):
         
         srf_network = PRF(exc_input_func = partial(array_input, input_matrix, params['dt']),
                           connect_exc_inh_input = True,
-                          n_excitatory = params['N_exc_srf'],
+                          n_excitatory = N_exc_srf,
                           n_inhibitory = params['N_inh_srf'],
                           n_outputs = params['N_outputs_srf'],
                           w_initial_E = params['w_initial_E'],
@@ -127,8 +141,8 @@ def eval_srf_net(input_matrix, params):
         conn_PV_I = nengo.Connection(srf_network.output.neurons,
                                      place_network.inh.neurons,
                                      transform=weights_initial_PV_I,
-                                     synapse=nengo.Alpha(params['tau_I']),
-                                     learning_rule_type=ISP(learning_rate=params['learning_rate_I']))
+                                     synapse=nengo.Alpha(params['tau_I']))
+
         with place_network:
             p_place_output_spikes = nengo.Probe(place_network.exc.neurons, synapse=None)
         with srf_network:
@@ -138,28 +152,38 @@ def eval_srf_net(input_matrix, params):
         sim.run(t_end)
                 
     srf_output_spikes = sim.data[p_output_spikes]
-    srf_output_rates = rates_kernel(sim.trange(), output_spikes, tau=0.1)
+    srf_output_rates = rates_kernel(sim.trange(), srf_output_spikes, tau=0.1)
     place_output_spikes = sim.data[p_place_output_spikes]
     place_output_rates = rates_kernel(sim.trange(), place_output_spikes, tau=0.1)
-    return (modulation_index(srf_output_rates) + modulation_index(place_output_rates))**2.
+
+    return np.asarray([obj_modulation_depth(srf_output_rates), 
+                       obj_modulation_depth(place_output_rates), 
+                       obj_fraction_active(srf_output_rates),
+                       obj_fraction_active(place_output_rates)])
 
 
-def obj_fun(pp, pid):
-    """ Objective function to be _maximized_ by GFS. """
-    res = eval_srf_net(input_matrix, pp)
-    logger.info(f"Iter: {pid}\t pp:{pp}, result:{res}")
-    # Since Dlib maximizes, but we want to find the minimum,
-    # we negate the result before passing it to the Dlib optimizer.
-    return -res
+
+def init_obj_fun(worker):
+    """ Returns objective function to be minimized. """
+
+    input_matrix = None
+    if worker.worker_id == 1:
+        input_matrix = np.load("/scratch1/03320/iraikov/srf_nengo_dof_input_matrix.npy")
+    input_matrix = worker.group_comm.bcast(input_matrix, root=0)
+
+    def obj_fun(pp, pid=None):
+        res = eval_srf_net(input_matrix, pp)
+        logger.info(f"Iter: {pid}\t pp:{pp}, result:{res}")
+        return res
+
+    return obj_fun
     
 if __name__ == '__main__':
 
     seed = 0
     dt = 0.001
-    t_end = input_matrix.shape[0]*dt
     
     N_outputs_srf = 2000
-    N_exc_srf = input_matrix.shape[1]
     N_inh_srf = int(N_outputs_srf/2)
 
     N_exc_place = 2000
@@ -167,8 +191,6 @@ if __name__ == '__main__':
     
     problem_parameters = {'seed': seed,
                           'dt': dt,
-                          't_end': t_end,
-                          'N_exc_srf': N_exc_srf,
                           'N_inh_srf': N_inh_srf,
                           'N_outputs_srf': N_outputs_srf,
                           'N_exc_place': N_exc_place,
@@ -196,13 +218,23 @@ if __name__ == '__main__':
              'learning_rate_E': [1e-4, 1e-1],
             }
 
-    # Create an optimizer
-    distgfs_params = {'opt_id': 'distgfs_srf_nengo_dof',
-                      'obj_fun_name': 'obj_fun',
-                      'obj_fun_module': 'optimize_srf_nengo_dof',
+    objective_names = ['srf_modulation_depth', 'place_modulation_depth', 
+                       'srf_fraction_active', 'place_fraction_active']
+
+    dmosopt_params = {'opt_id': 'dmosopt_srf_nengo_dof',
+                      'obj_fun_init_name': 'init_obj_fun',
+                      'obj_fun_init_args': {},
+                      'obj_fun_init_module': 'optimize_srf_nengo_dof',
                       'problem_parameters': problem_parameters,
                       'space': space,
-                      'n_iter': 2000}
+                      'n_iter': 10,
+                      'objective_names': objective_names,
+                      'n_initial': 50,
+                      'resample_fraction': 0.8,
+                      'mutation_rate': 0.5,
+                      'file_path': '/scratch1/03320/iraikov/dmosopt.srf_nengo_dof.h5',
+                      'save': True,
+                  }
     
-    distgfs.run(distgfs_params, spawn_workers=False, verbose=True)
+    best = dmosopt.run(dmosopt_params, spawn_workers=False, verbose=True)
             
