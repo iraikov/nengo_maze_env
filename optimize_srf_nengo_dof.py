@@ -111,7 +111,11 @@ def eval_srf_net(input_matrix, params):
         weights_dist_PV_E = rng.normal(size=N_outputs_srf*N_exc_place).reshape((N_exc_place, N_outputs_srf))
         weights_initial_PV_E = (weights_dist_PV_E - weights_dist_PV_E.min()) / (weights_dist_PV_E.max() - weights_dist_PV_E.min()) * w_PV_E
         for i in range(N_exc_place):
-            sources = np.asarray(rng.choice(N_outputs_srf, round(p_PV_E * N_outputs_srf), replace=False),
+            dist = i - np.asarray(range(N_outputs_srf))
+            sigma = p_PV_E * N_outputs_srf
+            weights = np.exp(-dist/sigma**2)
+            prob = weights / weights.sum(axis=0)
+            sources = np.asarray(rng.choice(N_outputs_srf, round(p_PV_E * N_outputs_srf), replace=False, p=prob),
                                  dtype=np.int32)
             weights_initial_PV_E[i, np.logical_not(np.in1d(range(N_outputs_srf), sources))] = 0.
                 
@@ -126,8 +130,12 @@ def eval_srf_net(input_matrix, params):
         weights_dist_SV_E = rng.normal(size=N_exc_srf*N_exc_place).reshape((N_exc_place, N_exc_srf))
         weights_initial_SV_E = (weights_dist_SV_E - weights_dist_SV_E.min()) / (weights_dist_SV_E.max() - weights_dist_SV_E.min()) * w_SV_E
         for i in range(N_exc_place):
-                sources = np.asarray(rng.choice(N_exc_srf, round(p_SV_E * N_exc_srf), replace=False), dtype=np.int32)
-                weights_initial_SV_E[i, np.logical_not(np.in1d(range(N_exc_srf), sources))] = 0.
+            dist = i - np.asarray(range(N_outputs_srf))
+            sigma = p_PV_E * N_outputs_srf
+            weights = np.exp(-dist/sigma**2)
+            prob = weights / weights.sum(axis=0)
+            sources = np.asarray(rng.choice(N_exc_srf, round(p_SV_E * N_exc_srf), replace=False, p=prob), dtype=np.int32)
+            weights_initial_SV_E[i, np.logical_not(np.in1d(range(N_exc_srf), sources))] = 0.
 
         conn_SV_E = nengo.Connection(srf_network.exc.neurons,
                                      place_network.exc.neurons,
