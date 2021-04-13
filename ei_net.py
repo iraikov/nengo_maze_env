@@ -8,6 +8,11 @@ import nengo_extras
 import nengo_extras.neurons
 from scipy.sparse import csc_matrix
 
+def distance_probs(dist, sigma):
+    weights = np.exp(-dist/sigma**2)
+    prob = weights / weights.sum(axis=0)
+    return prob
+
 ## Plastic excitatory-inhibitory network
 
 class EI(nengo.Network):
@@ -73,7 +78,10 @@ class EI(nengo.Network):
         else:
             weights_initial_E = np.zeros((n_excitatory, n_excitatory))
             for i in range(n_excitatory):
-                sources_Exc = np.asarray(rng.choice(n_excitatory, round(p_E * n_excitatory), replace=False), dtype=np.int32)
+                dist = i - np.asarray(range(n_excitatory))
+                sigma = p_E * n_excitatory
+                prob = distance_probs(dist, sigma)
+                sources_Exc = np.asarray(rng.choice(n_excitatory, round(p_E * n_excitatory), replace=False, p=prob), dtype=np.int32)
                 weights_initial_E[i, np.logical_not(np.in1d(range(n_excitatory), sources_Exc))] = 0.
                 w = rng.normal(size=len(sources_Exc))
                 weights_initial_E[i, sources_Exc] = (w - w.min()) / (w.max() - w.min()) * w_initial_E
@@ -91,7 +99,10 @@ class EI(nengo.Network):
             weights_initial_EE = (weights_dist_EE - weights_dist_EE.min()) / (weights_dist_EE.max() - weights_dist_EE.min()) * w_initial_EE
             for i in range(n_excitatory):
                 target_choices = np.asarray([ j for j in range(n_excitatory) if i != j ])
-                targets_Out = np.asarray(rng.choice(target_choices, round(p_EE * n_excitatory), replace=False),
+                dist = i - target_choices
+                sigma = p_EE * n_excitatory
+                prob = distance_probs(dist, sigma)
+                targets_Out = np.asarray(rng.choice(target_choices, round(p_EE * n_excitatory), replace=False, p=prob),
                                         dtype=np.int32)
                 weights_initial_EE[i, np.logical_not(np.in1d(range(n_excitatory), targets_Out))] = 0.
 

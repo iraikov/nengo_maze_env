@@ -3,13 +3,17 @@ from nengo.exceptions import SimulationError, ValidationError, BuildError
 from nengo.neurons import LIF, LIFRate
 from nengo.builder import Builder, Operator, Signal
 from nengo.builder.neurons import SimNeurons
-from nengo.learning_rules import *
+from nengo.learning_rules import _remove_default_post_synapse, LearningRuleType
 from nengo.builder.learning_rules import *
-from nengo.params import (NumberParam, BoolParam)
+from nengo.params import (Default, NumberParam, BoolParam)
+from nengo.synapses import (Lowpass, SynapseParam)
 from nengo.builder.operator import DotInc, ElementwiseInc, Copy, Reset
 from nengo.connection import LearningRule
 from nengo.ensemble import Ensemble, Neurons
+import numba
 from numba import jit, prange
+
+numba.config.THREADING_LAYER = 'threadsafe'
 
 # Creates new learning rule for reward-modulated synaptic plasticity (RMSP).
 # Based on the paper:
@@ -53,13 +57,21 @@ class RMSP(LearningRuleType):
         return _remove_default_post_synapse(super()._argreprs, self.pre_synapse)
 
     
+
 @jit(nopython=True, parallel=True, fastmath=True)
 def step_jit(kappa, post_filtered, pre_filtered, weights, reward, sgn, mask, delta):
-    rdelta = pre_filtered - reward
+    rdelta = pre_filtered
+    for i in prange(rdelta.shape[0]):
+        rdelta[i] = rdelta[i] - reward[0]
     for i in prange(weights.shape[0]):
-        factor = (1.0 - ((weights[i,:] * weights[i,:].T) / np.dot(weights[i,:], weights[i,:]))) * reward
-        delta[i,:] = rdelta * kappa * factor * pre_filtered * mask[i,:] * post_filtered[i]
+        weights_i = weights[i]
+        idxs = np.argwhere(mask[i,:]).ravel()
+        factor = (1.0 - ((weights_i[idxs] * weights_i[idxs].T) / np.dot(weights_i[idxs], weights_i[idxs]))) * reward[0]
+        sgn_i = sgn[i]
+        dw = rdelta[idxs] * sgn_i[idxs] * kappa * factor * pre_filtered[idxs] * post_filtered[i]
+        delta[i][idxs] = dw
 
+        
 # Builders for RMSP
 class SimRMSP(Operator):
     r"""Calculate connection weight change according to the Hebbian plasticity rule.
