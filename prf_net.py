@@ -55,6 +55,7 @@ class PRF(nengo.Network):
                  use_gdhl = False,
                  gdhl_sigma = { 'pp': 0.1, 'np': -0.1, 'pn': -0.1, 'nn': 0.1 },
                  gdhl_eta = { 'ps': 0.0, 'ns': 0.0, 'sp': 0.0, 'sn': 0.0 },
+                 sigma_scale = 0.1,
                  label = None,
                  seed = 0,
                  add_to_container = None,
@@ -87,31 +88,46 @@ class PRF(nengo.Network):
         if weights_E is not None:
             weights_initial_E = weights_E
         else:
-            weights_initial_E = np.zeros((n_outputs, n_excitatory))
+            weights_initial_E = rng.uniform(size=n_outputs*n_excitatory).reshape((n_outputs, n_excitatory)) * w_initial_E
+            if n_excitatory > n_outputs:
+                p = float(n_excitatory) / float(n_outputs)
+                r = 1.0
+            else:
+                p = 1.0
+                r = float(n_outputs) / float(n_excitatory)
             for i in range(n_outputs):
-                dist = i - np.asarray(range(n_excitatory))
-                sigma = p_E * n_excitatory
+                dist = np.abs(p*i - (r * np.asarray(range(n_excitatory))))
+                sigma = sigma_scale * p_E * n_excitatory
                 prob = distance_probs(dist, sigma)
-                sources_Exc = np.asarray(rng.choice(n_excitatory, round(p_E * n_excitatory), replace=False, p=prob), dtype=np.int32)
+                sources_Exc = np.asarray(rng.choice(n_excitatory, round(p_E * n_excitatory), replace=False, p=prob),
+                                         dtype=np.int32)
                 weights_initial_E[i, np.logical_not(np.in1d(range(n_excitatory), sources_Exc))] = 0.
-                w = rng.normal(size=len(sources_Exc))
-                weights_initial_E[i, sources_Exc] = (w - w.min()) / (w.max() - w.min()) * w_initial_E
+
+        self.weights_initial_E = weights_initial_E
                 
-        weights_dist_EI = rng.uniform(size=n_outputs*n_inhibitory).reshape((n_inhibitory, n_outputs))
-        weights_initial_EI = (weights_dist_EI - weights_dist_EI.min()) / (weights_dist_EI.max() - weights_dist_EI.min()) * w_initial_EI
-        for i in range(n_outputs):
-            targets_Inh = np.asarray(rng.choice(n_inhibitory, round(p_EI * n_inhibitory), replace=False), dtype=np.int32)
-            weights_initial_EI[np.logical_not(np.in1d(range(n_inhibitory), targets_Inh)), i] = 0.
+        weights_initial_EI = rng.uniform(size=n_outputs*n_inhibitory).reshape((n_inhibitory, n_outputs)) * w_initial_EI
+        if n_outputs > n_inhibitory:
+            p = float(n_outputs) / float(n_inhibitory)
+            r = 1.0
+        else:
+            p = 1.0
+            r = float(n_inhibitory) / float(n_outputs)
+        for i in range(n_inhibitory):
+            dist = np.abs(p*i - (r * np.asarray(range(n_outputs))))
+            sigma = sigma_scale * p_EI * n_outputs
+            prob = distance_probs(dist, sigma)
+            sources_Out = np.asarray(rng.choice(n_outputs, round(p_EI * n_outputs), replace=False, p=prob),
+                                         dtype=np.int32)
+            weights_initial_EI[i, np.logical_not(np.in1d(range(n_outputs), sources_Out))] = 0.
             
         if weights_EE is not None:
             weights_initial_EE = weights_EE
         else:
-            weights_dist_EE = rng.normal(size=n_outputs*n_outputs).reshape((n_outputs, n_outputs))
-            weights_initial_EE = (weights_dist_EE - weights_dist_EE.min()) / (weights_dist_EE.max() - weights_dist_EE.min()) * w_initial_EE
+            weights_initial_EE = rng.uniform(size=n_outputs*n_outputs).reshape((n_outputs, n_outputs)) * w_initial_EE
             for i in range(n_outputs):
                 target_choices = np.asarray([ j for j in range(n_outputs) if i != j ])
-                dist = i - target_choices
-                sigma = p_EE * n_outputs
+                dist = np.abs(i - target_choices)
+                sigma = sigma_scale * p_EE * n_outputs
                 prob = distance_probs(dist, sigma)
                 targets_Out = np.asarray(rng.choice(target_choices, round(p_EE * n_outputs), replace=False, p=prob),
                                         dtype=np.int32)
@@ -175,8 +191,6 @@ class PRF(nengo.Network):
                                                     transform=weights_dist_II,
                                                     synapse=nengo.Alpha(tau_I))
                                                                                                                                     
-            #csc_E = csc_matrix(weights_initial_E)
-            #transform_E = nengo.Sparse(shape=(n_outputs, n_excitatory), init=csc_E)
             self.conn_E = nengo.Connection(self.exc.neurons,
                                            self.output.neurons, 
                                            transform=weights_initial_E,
@@ -208,12 +222,19 @@ class PRF(nengo.Network):
                 if weights_E_Fb is not None:
                     weights_initial_E_Fb = weights_E_Fb
                 else:
-                    weights_initial_E_Fb = np.zeros((n_excitatory, n_outputs))
+                    if n_excitatory > n_outputs:
+                        p = float(n_excitatory) / float(n_outputs)
+                        r = 1.0
+                    else:
+                        p = 1.0
+                        r = float(n_outputs) / float(n_excitatory)
+                    weights_initial_E_Fb = rng.uniform(size=(n_excitatory*n_outputs)).reshape((n_excitatory*n_outputs))
                     for i in range(n_excitatory):
-                        sources_Out = np.asarray(rng.choice(n_outputs, round(p_E_Fb * n_outputs), replace=False), dtype=np.int32)
+                        dist = np.abs(p*i - (r * np.asarray(range(n_excitatory))))
+                        sigma = sigma_scale * p_E_Fb * n_outputs
+                        prob = distance_probs(dist, sigma)
+                        sources_Out = np.asarray(rng.choice(n_outputs, round(p_E_Fb * n_outputs), replace=False, p=prob), dtype=np.int32)
                         weights_initial_E_Fb[i, np.logical_not(np.in1d(range(n_outputs), sources_Out))] = 0.
-                        w = rng.normal(size=len(sources_Out))
-                        weights_initial_E_Fb[i, sources_Out] = (w - w.min()) / (w.max() - w.min()) * w_initial_E_Fb
                 self.conn_E_Fb = nengo.Connection(self.output.neurons,
                                                   self.exc.neurons,
                                                   transform=weights_initial_E_Fb,
