@@ -1,10 +1,11 @@
-
+import pprint
 from nengo.exceptions import SimulationError, ValidationError, BuildError
 from nengo.neurons import LIF, LIFRate
 from nengo.builder import Builder, Operator, Signal
 from nengo.builder.neurons import SimNeurons
 from nengo.learning_rules import *
 from nengo.builder.learning_rules import *
+from nengo.learning_rules import _remove_default_post_synapse
 from nengo.params import (NumberParam, BoolParam)
 from nengo.builder.operator import DotInc, ElementwiseInc, Copy, Reset
 from nengo.connection import LearningRule
@@ -13,38 +14,32 @@ import numba
 from numba import jit, prange
 
 
-# Creates new learning rule for inhibitory plasticity (ISP).
-# Based on the paper:
-#
-#    Inhibitory Plasticity Balances Excitation and Inhibition in Sensory
-#    Pathways and Memory Networks.
-#    T. P. Vogels, H. Sprekeler, F. Zenke, C. Clopath, W. Gerstner.
-#    Science 334, 2011
+# Creates new learning rule for coincidence detecting inhibitory plasticity (CDISP).
 # 
 
-class ISP(LearningRuleType):
+class CDISP(LearningRuleType):
     """Inhibitory plasticity learning rule.  Modifies connection weights
     according to the presynaptic and postsynaptic firing rates and the
-    target firing rate.
+    amplitude of the difference between input signals p and q.
 
     """
     modifies = 'weights'
-    probeable = ('pre_filtered', 'post_filtered', 'delta')
+    probeable = ('pre_filtered', 'post_filtered', 'error_filtered', 'delta')
     
     learning_rate = NumberParam("learning_rate", low=0, readonly=True, default=1e-6)
-    rho0 = NumberParam("rho0", low=0, readonly=True, default=10.)
     pre_synapse = SynapseParam("pre_synapse", default=Lowpass(tau=0.02), readonly=True)
     post_synapse = SynapseParam("post_synapse", default=None, readonly=True)
+    sigma_synapse = SynapseParam("sigma_synapse", default=Lowpass(tau=0.02), readonly=True)
     jit = BoolParam("jit", default=True, readonly=True)
 
     def __init__(self,
                  learning_rate=Default,
-                 rho0=Default,
                  pre_synapse=Default,
                  post_synapse=Default,
+                 sigma_synapse=Default,
                  jit=Default):
-        super().__init__(learning_rate, size_in=0)
-        self.rho0 = rho0
+        super().__init__(learning_rate, size_in="post")
+        self.sigma_synapse = sigma_synapse
         self.pre_synapse = pre_synapse
         self.post_synapse = (
             self.pre_synapse if post_synapse is Default else post_synapse
@@ -56,33 +51,36 @@ class ISP(LearningRuleType):
         return _remove_default_post_synapse(super()._argreprs, self.pre_synapse)
 
 @jit(nopython=True)
-def step_jit(kappa, rho0, post_filtered, pre_filtered, weights, mask, delta):
+def step_jit(kappa, error_filtered, post_filtered, pre_filtered, weights, mask, delta):
     for i in prange(weights.shape[0]):
-        delta[i,:] = -kappa * pre_filtered * mask[i,:] * (post_filtered[i] - rho0)
-        delta_sum = np.add(delta[i,:], weights[i,:]).reshape((-1,))
-        sat = np.nonzero(delta_sum >= 0)[0]
-        delta[i][sat] = 0.
+        idxs = np.argwhere(mask[i,:]).ravel()
+        dw = -kappa * pre_filtered[idxs] * error_filtered[i]
+        weights_i = weights[i]
+        dw_sum = np.add(dw, weights_i[idxs]).reshape((-1,))
+        sat = np.nonzero(dw_sum >= 0)[0]
+        dw[sat] = 0.
+        delta[i][idxs] = dw
     
 
 # Builders for ISP
-class SimISP(Operator):
-    r"""Calculate connection weight change according to the inhibitory plasticity rule.
+class SimCDISP(Operator):
+    r"""Calculate connection weight change according to the coincidence detection inhibitory plasticity rule.
     Implements the learning rule of the form:
-    .. math:: \delta{} weight_{ij} = \kappa * (pre * post - \rho_0 * pre)
+    .. math:: \delta{} weight_{ij} = \kappa * pre * post * sigma
     where
     * :math:`\kappa` is a scalar learning rate
     * :math:`\weight_{ij}` is the connection weight between the two neurons.
     * :math:`a_i` is the activity of the presynaptic neuron.
     * :math:`a_j` is the firing rate of the postsynaptic neuron.
-    * :math:`\rho_{0}` is the target firing rate
+    * :math:`\sigma` is the error signal
     Parameters
     ----------
     pre_filtered : Signal
         The presynaptic activity, :math:`a_i`.
     post_filtered : Signal
         The postsynaptic activity, :math:`a_j`.
-    rho0 : float
-        The target firing rate, :math:`\rho_{0}`.
+    sigma : Signal
+        Error signal , :math:`\sigma`.
     delta : Signal
         The synaptic weight change to be applied, :math:`\Delta \weight_{ij}`.
     learning_rate : float
@@ -95,8 +93,8 @@ class SimISP(Operator):
         The presynaptic activity, :math:`a_i`.
     post_filtered : Signal
         The postsynaptic activity, :math:`a_j`.
-    rho0 : float
-        The target firing rate, :math:`\rho_{0}`.
+    sigma : Signal
+        The postsynaptic activity, :math:`\sigma`.
     delta : Signal
         The synaptic weight change to be applied, :math:`\Delta \weight_{ij}`.
     learning_rate : float
@@ -107,18 +105,17 @@ class SimISP(Operator):
     -----
     1. sets ``[]``
     2. incs ``[]``
-    3. reads ``[pre_filtered, post_filtered, weights]``
+    3. reads ``[error_filtered, pre_filtered, post_filtered, weights]``
     4. updates ``[delta]``
     """
 
-    def __init__(self, pre_filtered, post_filtered, weights, rho0, delta, learning_rate, jit, tag=None):
-        super(SimISP, self).__init__(tag=tag)
+    def __init__(self, error_filtered, pre_filtered, post_filtered, weights, delta, learning_rate, jit, tag=None):
+        super(SimCDISP, self).__init__(tag=tag)
         self.learning_rate = learning_rate
-        self.rho0 = rho0
         self.mask = np.logical_not(np.isclose(weights.initial_value, 0.))
         self.sets = []
         self.incs = []
-        self.reads = [pre_filtered, post_filtered, weights]
+        self.reads = [error_filtered, pre_filtered, post_filtered, weights]
         self.updates = [delta]
         self.jit = jit
         
@@ -127,20 +124,25 @@ class SimISP(Operator):
         return self.updates[0]
 
     @property
-    def pre_filtered(self):
+    def error_filtered(self):
         return self.reads[0]
+    
+    @property
+    def pre_filtered(self):
+        return self.reads[1]
 
     @property
     def post_filtered(self):
-        return self.reads[1]
+        return self.reads[2]
     
     @property
     def weights(self):
-        return self.reads[2]
+        return self.reads[3]
    
     @property
     def _descstr(self):
-        return "pre=%s, post=%s -> %s" % (
+        return "error=%s, pre=%s, post=%s -> %s" % (
+            self.error_filtered,
             self.pre_filtered,
             self.post_filtered,
             self.delta,
@@ -148,50 +150,45 @@ class SimISP(Operator):
 
     
     def make_step(self, signals, dt, rng):
+        error_filtered = signals[self.error_filtered]
         pre_filtered = signals[self.pre_filtered]
         post_filtered = signals[self.post_filtered]
         weights = signals[self.weights]
         delta = signals[self.delta]
         kappa = self.learning_rate * dt
-        rho0 = self.rho0
         mask = self.mask
         jit = self.jit
         
-        def step_simisp():
-            ## The code below is an optimized version of the following:
-            #for i in range(weights.shape[0]):
-            #    delta[i,:] = -kappa * pre_filtered * mask[i,:] * (post_filtered[i] - rho0)
-            #    delta_sum = np.add(delta[i,:], weights[i,:])
+        def step_simcdisp():
             if jit:
-                step_jit(kappa, rho0, post_filtered, pre_filtered, weights, mask, delta)
+                step_jit(kappa, error_filtered, post_filtered, pre_filtered, weights, mask, delta)
             else:
-                a = -kappa * (post_filtered - rho0)
-                np.multiply(self.mask, pre_filtered, out=delta)
-                np.multiply(a[:, np.newaxis], delta, out=delta)
+                a = -kappa * pre_filtered * self.mask * error_filtered
+                np.multiply(a, delta, out=delta)
                 delta_sum = np.add(delta, weights)
                 sat = np.nonzero(delta_sum >= 0)
                 delta[sat] = 0.
             
-        return step_simisp
+        return step_simcdisp
 
     
-@Builder.register(ISP)
-def build_isp(model, isp, rule):
-    """Builds a `.ISP` object into a model.
+@Builder.register(CDISP)
+def build_cdisp(model, cdisp, rule):
+    """Builds a `.CDISP` object into a model.
     Calls synapse build functions to filter the pre and post activities,
-    and adds a `.SimISP` operator to the model to calculate the delta.
+    and adds a `.SimCDISP` operator to the model to calculate the delta.
     Parameters
     ----------
     model : Model
         The model to build into.
-    isp : ISP
+    cdisp : CDISP
         Learning rule type to build.
     rule : LearningRule
         The learning rule object corresponding to the neuron type.
     Notes
     -----
     Does not modify ``model.params[]`` and can therefore be called
-    more than once with the same `.ISP` instance.
+    more than once with the same `.CDISP` instance.
     """
 
     conn = rule.connection
@@ -201,23 +198,29 @@ def build_isp(model, isp, rule):
     post_activities = model.sig[get_post_ens(conn).neurons]["out"]
     if conn.post_slice is not None:
         post_activities = post_activities[conn.post_slice]
-    pre_filtered = build_or_passthrough(model, isp.pre_synapse, pre_activities)
-    post_filtered = build_or_passthrough(model, isp.post_synapse, post_activities)
+    pre_filtered = build_or_passthrough(model, cdisp.pre_synapse, pre_activities)
+    post_filtered = build_or_passthrough(model, cdisp.post_synapse, post_activities)
     weights = model.sig[conn]["weights"]
-                
+    error_filtered = build_or_passthrough(model, cdisp.sigma_synapse,
+                                          Signal(shape=rule.size_in, name="CDISP:error"))
+    #model.add_op(Reset(error_filtered))
+    model.sig[rule]["in"] = error_filtered  # error connection will attach here
+
+    
     model.add_op(
-        SimISP(
+        SimCDISP(
+            error_filtered,
             pre_filtered,
             post_filtered,
             weights,
-            isp.rho0,
             model.sig[rule]["delta"],
-            learning_rate=isp.learning_rate,
-            jit=isp.jit
+            learning_rate=cdisp.learning_rate,
+            jit=cdisp.jit
         )
     )
 
     # expose these for probes
     model.sig[rule]["pre_filtered"] = pre_filtered
     model.sig[rule]["post_filtered"] = post_filtered
+    model.sig[rule]["error_filtered"] = error_filtered
 

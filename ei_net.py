@@ -62,9 +62,9 @@ class EI(nengo.Network):
         self.n_inhibitory = n_inhibitory
 
         if exc_coordinates is None:
-            self.exc_coordinates = np.asarray(range(n_excitatory)).reshape((n_excitatory,1))
+            self.exc_coordinates = np.asarray(range(n_excitatory)).reshape((n_excitatory,1)) / n_excitatory
         if inh_coordinates is None:
-            self.inh_coordinates = np.asarray(range(n_inhibitory)).reshape((n_inhibitory,1))
+            self.inh_coordinates = np.asarray(range(n_inhibitory)).reshape((n_inhibitory,1)) / n_inhibitory
         
         rng = np.random.RandomState(seed=seed)
 
