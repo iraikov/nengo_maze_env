@@ -6,8 +6,9 @@ from isp import ISP
 from gdhl import GDHL
 import nengo_extras
 import nengo_extras.neurons
+import scipy
 from scipy.sparse import csc_matrix
-
+from scipy.spatial.distance import cdist
 
 def distance_probs(dist, sigma):
     weights = np.exp(-dist/sigma**2)
@@ -55,6 +56,9 @@ class PRF(nengo.Network):
                  use_gdhl = False,
                  gdhl_sigma = { 'pp': 0.1, 'np': -0.1, 'pn': -0.1, 'nn': 0.1 },
                  gdhl_eta = { 'ps': 0.0, 'ns': 0.0, 'sp': 0.0, 'sn': 0.0 },
+                 exc_coordinates = None,
+                 inh_coordinates = None,
+                 output_coordinates = None,
                  label = None,
                  seed = 0,
                  add_to_container = None,
@@ -70,6 +74,13 @@ class PRF(nengo.Network):
         self.n_excitatory = n_excitatory
         self.n_inhibitory = n_inhibitory
         self.n_outputs = n_outputs
+
+        if exc_coordinates is None:
+            self.exc_coordinates = np.asarray(range(n_excitatory)).reshape((n_excitatory,1))
+        if inh_coordinates is None:
+            self.inh_coordinates = np.asarray(range(n_inhibitory)).reshape((n_inhibitory,1))
+        if output_coordinates is None:
+            self.output_coordinates = np.asarray(range(n_outputs)).reshape((n_outputs,1))
         
         rng = np.random.RandomState(seed=seed)
 
@@ -83,13 +94,14 @@ class PRF(nengo.Network):
         else:
             weights_initial_I = rng.uniform(size=n_inhibitory*n_outputs).reshape((n_outputs, n_inhibitory)) * w_initial_I
 
-        
+        print(self.output_coordinates.shape)
+        print(self.exc_coordinates.shape)
         if weights_E is not None:
             weights_initial_E = weights_E
         else:
             weights_initial_E = np.zeros((n_outputs, n_excitatory))
             for i in range(n_outputs):
-                dist = i - np.asarray(range(n_excitatory))
+                dist = cdist(self.output_coordinates[i,:].reshape((1,-1)), self.exc_coordinates).flatten()
                 sigma = p_E * n_excitatory
                 prob = distance_probs(dist, sigma)
                 sources_Exc = np.asarray(rng.choice(n_excitatory, round(p_E * n_excitatory), replace=False, p=prob), dtype=np.int32)
@@ -110,7 +122,7 @@ class PRF(nengo.Network):
             weights_initial_EE = (weights_dist_EE - weights_dist_EE.min()) / (weights_dist_EE.max() - weights_dist_EE.min()) * w_initial_EE
             for i in range(n_outputs):
                 target_choices = np.asarray([ j for j in range(n_outputs) if i != j ])
-                dist = i - target_choices
+                dist = cdist(self.output_coordinates[i,:].reshape((1,-1)), self.output_coordinates[target_choices]).flatten()
                 sigma = p_EE * n_outputs
                 prob = distance_probs(dist, sigma)
                 targets_Out = np.asarray(rng.choice(target_choices, round(p_EE * n_outputs), replace=False, p=prob),

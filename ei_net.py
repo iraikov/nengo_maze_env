@@ -7,6 +7,7 @@ from gdhl import GDHL
 import nengo_extras
 import nengo_extras.neurons
 from scipy.sparse import csc_matrix
+from scipy.spatial.distance import cdist
 
 def distance_probs(dist, sigma):
     weights = np.exp(-dist/sigma**2)
@@ -59,6 +60,11 @@ class EI(nengo.Network):
         self.dimensions = dimensions
         self.n_excitatory = n_excitatory
         self.n_inhibitory = n_inhibitory
+
+        if exc_coordinates is None:
+            self.exc_coordinates = np.asarray(range(n_excitatory)).reshape((n_excitatory,1))
+        if inh_coordinates is None:
+            self.inh_coordinates = np.asarray(range(n_inhibitory)).reshape((n_inhibitory,1))
         
         rng = np.random.RandomState(seed=seed)
 
@@ -78,7 +84,7 @@ class EI(nengo.Network):
         else:
             weights_initial_E = np.zeros((n_excitatory, n_excitatory))
             for i in range(n_excitatory):
-                dist = i - np.asarray(range(n_excitatory))
+                dist = cdist(self.exc_coordinates[i,:].reshape((1,-1)), self.exc_coordinates).flatten()
                 sigma = p_E * n_excitatory
                 prob = distance_probs(dist, sigma)
                 sources_Exc = np.asarray(rng.choice(n_excitatory, round(p_E * n_excitatory), replace=False, p=prob), dtype=np.int32)
@@ -99,7 +105,7 @@ class EI(nengo.Network):
             weights_initial_EE = (weights_dist_EE - weights_dist_EE.min()) / (weights_dist_EE.max() - weights_dist_EE.min()) * w_initial_EE
             for i in range(n_excitatory):
                 target_choices = np.asarray([ j for j in range(n_excitatory) if i != j ])
-                dist = i - target_choices
+                dist = cdist(self.output_coordinates[i,:].reshape((1,-1)), self.output_coordinates[target_choices]).flatten()
                 sigma = p_EE * n_excitatory
                 prob = distance_probs(dist, sigma)
                 targets_Out = np.asarray(rng.choice(target_choices, round(p_EE * n_excitatory), replace=False, p=prob),
