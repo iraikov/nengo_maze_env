@@ -169,7 +169,7 @@ class SimISP(Operator):
                 np.multiply(self.mask, pre_filtered, out=delta)
                 np.multiply(a[:, np.newaxis], delta, out=delta)
                 delta_sum = np.add(delta, weights)
-                sat = np.nonzero(np.logical_or(delta_sum >= 0, delta_sum < -1))
+                sat = np.nonzero(delta_sum >= 0)
                 delta[sat] = 0.
             
         return step_simisp

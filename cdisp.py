@@ -1,4 +1,4 @@
-
+import pprint
 from nengo.exceptions import SimulationError, ValidationError, BuildError
 from nengo.neurons import LIF, LIFRate
 from nengo.builder import Builder, Operator, Signal
@@ -27,15 +27,13 @@ class CDISP(LearningRuleType):
     probeable = ('pre_filtered', 'post_filtered', 'error_filtered', 'delta')
     
     learning_rate = NumberParam("learning_rate", low=0, readonly=True, default=1e-6)
-    rho0 = NumberParam("rho0", low=0, readonly=True, default=10.)
     pre_synapse = SynapseParam("pre_synapse", default=Lowpass(tau=0.02), readonly=True)
     post_synapse = SynapseParam("post_synapse", default=None, readonly=True)
-    sigma_synapse = SynapseParam("sigma_synapse", default=Lowpass(tau=0.05), readonly=True)
+    sigma_synapse = SynapseParam("sigma_synapse", default=Lowpass(tau=0.02), readonly=True)
     jit = BoolParam("jit", default=True, readonly=True)
 
     def __init__(self,
                  learning_rate=Default,
-                 rho0=Default,
                  pre_synapse=Default,
                  post_synapse=Default,
                  sigma_synapse=Default,
@@ -56,7 +54,7 @@ class CDISP(LearningRuleType):
 def step_jit(kappa, error_filtered, post_filtered, pre_filtered, weights, mask, delta):
     for i in prange(weights.shape[0]):
         idxs = np.argwhere(mask[i,:]).ravel()
-        dw = -kappa * pre_filtered[idxs] * post_filtered[i] * error_filtered[i]
+        dw = -kappa * pre_filtered[idxs] * error_filtered[i]
         weights_i = weights[i]
         dw_sum = np.add(dw, weights_i[idxs]).reshape((-1,))
         sat = np.nonzero(dw_sum >= 0)[0]
@@ -165,9 +163,8 @@ class SimCDISP(Operator):
             if jit:
                 step_jit(kappa, error_filtered, post_filtered, pre_filtered, weights, mask, delta)
             else:
-                a = -kappa * post_filtered * error_filtered
-                np.multiply(self.mask, pre_filtered, out=delta)
-                np.multiply(a[:, np.newaxis], delta, out=delta)
+                a = -kappa * pre_filtered * self.mask * error_filtered
+                np.multiply(a, delta, out=delta)
                 delta_sum = np.add(delta, weights)
                 sat = np.nonzero(delta_sum >= 0)
                 delta[sat] = 0.
