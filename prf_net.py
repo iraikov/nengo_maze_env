@@ -78,10 +78,16 @@ class PRF(nengo.Network):
 
         if exc_coordinates is None:
             self.exc_coordinates = np.asarray(range(n_excitatory)).reshape((n_excitatory,1)) / n_excitatory
+        else:
+            self.exc_coordinates = exc_coordinates
         if inh_coordinates is None:
             self.inh_coordinates = np.asarray(range(n_inhibitory)).reshape((n_inhibitory,1)) / n_inhibitory
+        else:
+            self.inh_coordinates = inh_coordinates
         if output_coordinates is None:
             self.output_coordinates = np.asarray(range(n_outputs)).reshape((n_outputs,1)) / n_outputs
+        else:
+            self.output_coordinates = output_coordinates
         
         rng = np.random.RandomState(seed=seed)
 

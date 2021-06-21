@@ -4,6 +4,7 @@ sys.path.append('/home/igr/src/model/nengo_maze_env')
 from functools import partial
 import nengo
 import numpy as np
+from scipy.spatial.distance import cdist
 #import matplotlib.pyplot as plt
 from prf_net import PRF
 from cdisp import CDISP
@@ -24,40 +25,12 @@ def distance_probs(dist, sigma):
     return prob                                                                                                                    
 
 
-def contiguous_ranges(input, return_indices=False):
-    """Finds contiguous regions of the array "input". Returns
-    a list of ranges with the start and end index of each region. Code based on:
-    https://stackoverflow.com/questions/4494404/find-large-number-of-consecutive-values-fulfilling-condition-in-a-numpy-array/4495197
-    """
-
-    # Find the indices of changes in "condition"
-    d = np.diff(input)
-    nz, = d.nonzero() 
-
-    # We need to start things after the change in "condition". Therefore, 
-    # we'll shift the ranges by 1 to the right.
-    nz += 1
-    nz = np.concatenate([nz, [input.size]])
-    
-    ranges = np.vstack([ [nz[ri], nz[ri+1]] for ri in range(nz.size-1) ])
-    ranges = np.vstack([[0, nz[0]], ranges])
-
-    # Reshape the result into two columns
-    ranges.shape = (-1,2)
-
-    if return_indices:
-        result = ( np.arange(*r) for r in ranges )
-    else:
-        result = ranges
-
-    return result
-
 dof_input_matrix = np.asarray(np.load("coral_env_dof_array.npy"), dtype=np.float32)
-print(f'dof_input_matrix shape: {dof_input_matrix.shape}')
 cnt_input_matrix = np.asarray(np.load("coral_env_cnt_array.npy"), dtype=np.float32)
-print(f'cnt_input_matrix shape: {cnt_input_matrix.shape}')
 
 n_samples = dof_input_matrix.shape[-1]
+n_x = dof_input_matrix.shape[0]*2
+n_y = dof_input_matrix.shape[1]
 
 dof_input_flat = dof_input_matrix.reshape((-1, n_samples))
 cnt_input_flat = cnt_input_matrix.reshape((-1, n_samples))
@@ -67,7 +40,7 @@ n_trials = 3
 input_matrix = np.vstack((dof_input_flat, cnt_input_flat))
 print(f'input_matrix shape: {input_matrix.shape}')
 normed_input_matrix = input_matrix / np.max(input_matrix)
-train_data = np.tile(np.repeat(normed_input_matrix[:,:60], n_steps, axis=1), (1, n_trials))
+train_data = np.tile(np.repeat(normed_input_matrix[:,:10], n_steps, axis=1), (1, n_trials))
 print(f'train_data shape: {train_data.shape}')
 print(np.max(train_data))
 np.save("srf_nengo_dof_input_matrix.npy", train_data)
@@ -82,9 +55,11 @@ def array_input(input_matrix, dt, t, *args):
 
 N_inputs = train_data.shape[0]
 
-N_outputs_srf = 1000
+U_outputs_srf = 32
+N_outputs_srf = U_outputs_srf*U_outputs_srf
 N_exc_srf = N_inputs
-N_inh_srf = int(N_outputs_srf/4)
+U_inh_srf = 48
+N_inh_srf = U_inh_srf*U_inh_srf
 
 
 N_inh_decoder = int(N_inh_srf)
@@ -122,7 +97,7 @@ params = {'w_initial_E': 0.01,
           'w_EI_Ext': 0.02956312, 
           'w_PV_E': 0.005, 
           'w_PV_I': 0.001, 
-          'p_E_srf': 0.2, 
+          'p_E_srf': 0.3, 
           'p_EE': 0.01, 
           'p_EI': 0.1,
           'p_EI_Ext': 0.007, 
@@ -133,7 +108,12 @@ params = {'w_initial_E': 0.01,
           'learning_rate_I': 0.01, 
           'learning_rate_E': 0.04596530}
 
+srf_exc_coords = np.column_stack([x.flat for x in np.meshgrid(np.linspace(0, 1, n_x), np.linspace(0, 1, n_y), indexing='ij')])
+srf_inh_coords = np.column_stack([x.flat for x in np.meshgrid(np.linspace(0, 1, U_inh_srf), np.linspace(0, 1, U_inh_srf), indexing='ij')])
+srf_output_coords = np.column_stack([x.flat for x in np.meshgrid(np.linspace(0, 1, U_outputs_srf), np.linspace(0, 1, U_outputs_srf), indexing='ij')])
 
+decoder_coords = np.column_stack([x.flat for x in np.meshgrid(np.linspace(0, 1, n_x), np.linspace(0, 1, n_y), indexing='ij')])
+decoder_inh_coords = np.column_stack([x.flat for x in np.meshgrid(np.linspace(0, 1, U_inh_srf), np.linspace(0, 1, U_inh_srf), indexing='ij')])
 
 with srf_place_network as model:
     
@@ -145,7 +125,7 @@ with srf_place_network as model:
                       n_outputs = N_outputs_srf,
                       isp_target_rate = 1.0,
                       tau_input = params['tau_input'],
-
+                      
                       w_initial_E = params['w_initial_E'],
                       w_initial_I = params['w_initial_I'],
                       w_initial_EI = params['w_initial_EI'],
@@ -158,64 +138,67 @@ with srf_place_network as model:
                       tau_I = params['tau_I'],
                       learning_rate_I=params['learning_rate_I'],
                       learning_rate_E=params['learning_rate_E'],
+
+                      exc_coordinates = srf_exc_coords,
+                      inh_coordinates = srf_inh_coords,
+                      output_coordinates = srf_output_coords,
                
                       label="Spatial receptive field network",
                       seed=srf_seed)
     
     decoder = nengo.Ensemble(N_exc_srf, dimensions=1,
-                             neuron_type = nengo.SpikingRectifiedLinear(),                                                                  
-                             radius = 1,                                                                                             
+                             neuron_type = nengo.SpikingRectifiedLinear(),
+                             radius = 1,
                              intercepts=nengo.dists.Choice([0.1]),                                                 
                              max_rates=nengo.dists.Choice([40]))
+
     decoder_inh =  nengo.Ensemble(N_inh_decoder, dimensions=1,
-                             neuron_type = nengo.RectifiedLinear(),                                                                  
-                             radius = 1,                                                                                             
-                             intercepts=nengo.dists.Choice([0.1]),                                                 
-                             max_rates=nengo.dists.Choice([100]))
+                                  neuron_type = nengo.RectifiedLinear(),
+                                  radius = 1,                                                                                                              
+                                  intercepts=nengo.dists.Choice([0.1]),                                                 
+                                  max_rates=nengo.dists.Choice([100]))
 
  
     w_PV_E = params['w_PV_E']
     p_PV = params['p_PV']
-    #weights_dist_PV_E = rng.uniform(size=N_outputs_srf*N_exc_srf).reshape((N_exc_srf, N_outputs_srf))
     weights_initial_PV_E = rng.uniform(size=N_outputs_srf*N_exc_srf).reshape((N_exc_srf, N_outputs_srf)) * w_PV_E
-    r = float(N_exc_srf) / float(N_outputs_srf)
     for i in range(N_exc_srf):
-        dist = np.abs(i - (r * np.asarray(range(N_outputs_srf))))                                                                    
-        sigma = p_PV * N_outputs_srf / 10.0                                                                                       
+        dist = cdist(decoder_coords[i,:].reshape((1,-1)), srf_output_coords).flatten()
+        sigma = 1
         prob = distance_probs(dist, sigma)    
         sources = np.asarray(rng.choice(N_outputs_srf, round(p_PV * N_outputs_srf), replace=False, p=prob), dtype=np.int32)
         weights_initial_PV_E[i, np.logical_not(np.in1d(range(N_outputs_srf), sources))] = 0.
 
     conn_PV_E = nengo.Connection(srf_network.output.neurons,
-                             decoder.neurons,
-                             transform=weights_initial_PV_E,
-                             synapse=nengo.Alpha(params['tau_E']))
-                             #learning_rule_type=HSP(learning_rate=1e-2))
+                                 decoder.neurons,
+                                 transform=weights_initial_PV_E,
+                                 synapse=nengo.Alpha(params['tau_E']))
+    #learning_rule_type=HSP(learning_rate=1e-2))
 
 
     w_PV_I = params['w_PV_I']
     weights_initial_PV_I = rng.uniform(size=N_inh_decoder*N_outputs_srf).reshape((N_inh_decoder, N_outputs_srf)) * w_PV_I
     r = float(N_outputs_srf) / float(N_inh_decoder)
     for i in range(N_inh_decoder):
-        dist = np.abs(r*i - np.asarray(range(N_outputs_srf)))                                                            
-        sigma = p_PV * N_outputs_srf / 10.0                                                                                       
+        dist = cdist(decoder_inh_coords[i,:].reshape((1,-1)), srf_output_coords).flatten()
+        sigma = 1
         prob = distance_probs(dist, sigma)    
         sources = np.asarray(rng.choice(N_outputs_srf, round(p_PV * N_outputs_srf), replace=False, p=prob), dtype=np.int32)
         weights_initial_PV_I[i, np.logical_not(np.in1d(range(N_outputs_srf), sources))] = 0.
     conn_PV_I = nengo.Connection(srf_network.output.neurons,
-                             decoder_inh.neurons,
-                             transform=weights_initial_PV_I,
-                             synapse=nengo.Alpha(params['tau_E']))
+                                 decoder_inh.neurons,
+                                 transform=weights_initial_PV_I,
+                                 synapse=nengo.Alpha(params['tau_E']))
     
     w_decoder_I = params['w_initial_I']
     weights_initial_decoder_I = rng.uniform(size=N_inh_decoder*N_exc_srf).reshape((N_exc_srf, N_inh_decoder)) * w_decoder_I
 
     conn_decoder_I = nengo.Connection(decoder_inh.neurons,
-                             decoder.neurons,
-                             transform=weights_initial_decoder_I,
-                             synapse=nengo.Alpha(params['tau_I']),
-                             learning_rule_type=CDISP(learning_rate=0.025))
- 
+                                      decoder.neurons,
+                                      transform=weights_initial_decoder_I,
+                                      synapse=nengo.Alpha(params['tau_I']),
+                                      learning_rule_type=CDISP(learning_rate=0.025))
+    
     coincidence_detection = nengo.Node(size_in=N_inputs*2, size_out=N_inputs,
                                       output=lambda t,x: np.subtract(x[:N_inputs], x[N_inputs:]) * 0.1)
     nengo.Connection(coincidence_detection, conn_decoder_I.learning_rule)
@@ -250,12 +233,14 @@ inh_rates = sim.data[p_inh_rates]
 decoder_spikes = sim.data[p_decoder_spikes]
 decoder_inh_rates = sim.data[p_decoder_inh_rates]
 output_rates = rates_kernel(sim.trange(), output_spikes, tau=0.1)
+decoder_rates = rates_kernel(sim.trange(), decoder_spikes, tau=0.1)
 
 exc_weights = sim.data[p_exc_weights]
 #inh_weights = sim.data[p_inh_weights] 
 np.save("output_spikes_dof.npy", output_spikes)
 np.save("output_rates_dof.npy", output_rates)
 np.save("decoder_spikes_dof.npy", decoder_spikes)
+np.save("decoder_rates_dof.npy", decoder_rates)
 np.save("exc_rates_dof.npy", exc_rates)
 np.save("inh_rates_dof.npy", inh_rates)
 

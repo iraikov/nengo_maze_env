@@ -79,7 +79,7 @@ def eval_srf_net(input_matrix, params):
                           w_initial_I = params['w_initial_I'],
                           w_initial_EI = params['w_initial_EI'],
                           w_EI_Ext = params['w_EI_Ext'],
-                          p_E = params['p_E'],
+                          p_E = params['p_E_srf'],
                           p_EE = params['p_EE'],
                           p_EI_Ext = params['p_EI_Ext'],
                           p_EI = params['p_EI'],
@@ -97,6 +97,7 @@ def eval_srf_net(input_matrix, params):
                            isp_target_rate = params['isp_target_rate'],
                            learning_rate_I=params['learning_rate_I'],
                            learning_rate_E=params['learning_rate_E'],
+                           p_E = params['p_E_place'],
                            p_EE = params['p_EE'],
                            p_EI = params['p_EI'],
                            tau_E = params['tau_E'], 
@@ -130,8 +131,8 @@ def eval_srf_net(input_matrix, params):
         weights_dist_SV_E = rng.normal(size=N_exc_srf*N_exc_place).reshape((N_exc_place, N_exc_srf))
         weights_initial_SV_E = (weights_dist_SV_E - weights_dist_SV_E.min()) / (weights_dist_SV_E.max() - weights_dist_SV_E.min()) * w_SV_E
         for i in range(N_exc_place):
-            dist = i - np.asarray(range(N_outputs_srf))
-            sigma = p_PV_E * N_outputs_srf
+            dist = i - np.asarray(range(N_exc_srf))
+            sigma = p_SV_E * N_exc_srf
             weights = np.exp(-dist/sigma**2)
             prob = weights / weights.sum(axis=0)
             sources = np.asarray(rng.choice(N_exc_srf, round(p_SV_E * N_exc_srf), replace=False, p=prob), dtype=np.int32)
@@ -191,11 +192,11 @@ if __name__ == '__main__':
     seed = 0
     dt = 0.001
     
-    N_outputs_srf = 2000
-    N_inh_srf = int(N_outputs_srf/2)
+    N_outputs_srf = 1000
+    N_inh_srf = int(N_outputs_srf/4)
 
-    N_exc_place = 2000
-    N_inh_place = int(N_exc_place/2)
+    N_exc_place = 1000
+    N_inh_place = int(N_exc_place/4)
     
     problem_parameters = {'seed': seed,
                           'dt': dt,
@@ -213,15 +214,16 @@ if __name__ == '__main__':
              'w_EI_Ext': [1e-5, 1e-1],
              'w_PV_E': [1e-5, 1e-1],
              'w_SV_E': [1e-5, 1e-1],
-             'w_PV_I': [-1e-1, -1e-5],
-             'p_E': [0.01, 0.5],
-             'p_EE': [0.01, 0.5],
-             'p_EI': [0.01, 0.5],
-             'p_EI_Ext': [0.01, 0.5],
-             'p_PV_E': [0.001, 0.1],
+             'w_PV_I': [1e-5, 1e-1],
+             'p_E_srf': [0.001, 0.25],
+             'p_E_place': [0.001, 0.25],
+             'p_EE': [0.01, 0.25],
+             'p_EI': [0.01, 0.25],
+             'p_EI_Ext': [0.001, 0.1],
+             'p_PV_E': [0.005, 0.1],
              'p_SV_E': [0.001, 0.1],
-             'tau_E': [0.01, 0.1],
-             'tau_I': [0.01, 0.1],
+             'tau_E': [0.005, 0.05],
+             'tau_I': [0.01, 0.05],
              'learning_rate_I': [1e-4, 1e-1],
              'learning_rate_E': [1e-4, 1e-1],
             }
@@ -240,7 +242,7 @@ if __name__ == '__main__':
                       'n_initial': 50,
                       'resample_fraction': 0.8,
                       'mutation_rate': 0.5,
-                      'file_path': '/scratch1/03320/iraikov/dmosopt.srf_nengo_dof.h5',
+                      'file_path': '/scratch1/03320/iraikov/dmosopt.srf_nengo_dof_4.h5',
                       'save': True,
                   }
     
