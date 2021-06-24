@@ -178,10 +178,10 @@ def run(model_dict, t_end, dt=0.001):
     srf_inh_rates = sim.data[p_srf_inh_rates]
     decoder_spikes = sim.data[p_decoder_spikes]
     decoder_inh_rates = sim.data[p_decoder_inh_rates]
-    #np.save("srf_exc_rates", np.asarray(exc_rates, dtype=np.float32))
     np.save("srf_inh_rates", np.asarray(srf_inh_rates, dtype=np.float32))
     np.save("srf_output_spikes", np.asarray(srf_output_spikes, dtype=np.float32))
     np.save("srf_time_range", np.asarray(sim.trange(), dtype=np.float32))
+    np.save("decoder_spikes", np.asarray(decoder_spikes, dtype=np.float32))
     srf_output_rates = rates_kernel(sim.trange(), srf_output_spikes, tau=0.1)
     #sorted_idxs = np.argsort(-np.argmax(output_rates[53144:].T, axis=1))
 
