@@ -1,243 +1,196 @@
-from tqdm import tqdm
-import glob
+
+import sys, gc
 from functools import partial
+import nengo
 import numpy as np
-from PIL import Image
-import matplotlib.pyplot as plt
-from matplotlib import cm
+from prf_net import PRF
+from cdisp import CDISP
+from hsp import HSP
+from isp import ISP
 import scipy.interpolate
 from scipy.interpolate import Rbf, PchipInterpolator, Akima1DInterpolator
-import nengo
-from nengo_extras.plot_spikes import (
-    cluster, merge, plot_spikes, preprocess_spikes, sample_by_variance, sample_by_activity)
+from scipy.spatial.distance import cdist
 from nengo_extras.neurons import (
-    rates_kernel, rates_isi )
-from prf_net import PRF
-import tensorflow as tf
-from vlae import flatten_binary_crossentropy 
-# In[2]:
+    rates_kernel, rates_isi, spikes2events )
+from nengo.utils.progress import TerminalProgressBar
 
-xdim = 128
-ydim = 96
+def distance_probs(dist, sigma):                                                                                                   
+    weights = np.exp(-dist/sigma**2)                                                                                               
+    prob = weights / weights.sum(axis=0)                                                                                           
+    return prob                                                                                                                    
 
-default_data_prefix = './rgbd_dataset_freiburg1_xyz'
+def array_input(input_matrix, dt, t, *args):
+    i = int(t/dt)
+    if i >= input_matrix.shape[-1]:
+        i = -1
+    return input_matrix[i].ravel()
 
-def prepare_input_data(data_prefix, n_sample=-1):
 
-    coords_data = []
-    time_data = []
-    with open("%s/groundtruth.txt" % data_prefix, 'r') as f:
-        for line in f.readlines():
-            if line.startswith('#'):
-                continue
-            items = line.split(' ')
-            t = float(items[0])
-            tx, ty, tz = map(float, items[1:4])
-            time_data.append(t)
-            coords_data.append([tx, ty, tz])
-
-    frame_time_data = []
-    with open("%s/rgb.txt" % data_prefix, 'r') as f:
-        for line in f.readlines():
-            if line.startswith('#'):
-                continue
-            items = line.split(' ')
-            t = float(items[0])
-            frame_time_data.append(t)
-
-    input_time_array = np.asarray(frame_time_data)        
-    input_time_array = (input_time_array - input_time_array[0])
-
-    input_file_list = glob.glob("%s/rgb/*.png" % data_prefix)
+def build_network(params, inputs, coords, seed=None, dt=0.001):
     
-    n_input = len(input_file_list)
-    all_data = np.zeros((n_input,xdim,ydim))
-    for i in range(n_input):
-        data_frame = np.array(Image.open(input_file_list[i]).resize((xdim,ydim)).convert('LA'))/255.
-        all_data[i,:,:] = data_frame[:,:,0].T
+    if seed is None:
+        seed = 19
 
-    vlae = tf.keras.models.load_model("vlae_dataset_freiburg1",
-                                      custom_objects={ 'flatten_binary_crossentropy': flatten_binary_crossentropy })
-
-    encoder = vlae.get_layer("encoder")
-    if n_sample > 0:
-        encoded_inputs = encoder.predict(all_data[:n_sample])
-    else:
-        encoded_inputs = encoder.predict(all_data)
-
-    return input_time_array, all_data, encoded_inputs, encoder
-
-
-def generate_input_ip(time_array, input_arrays, peak_rate=1., basis_function='gaussian', n_trials=1, nsample=None, sample_seed=0, trial_dt=0.001):
-
-    input_ip_dict = {}
-    norm_input_arrays = []
-    for m, input_array in enumerate(input_arrays):
-
-        norm_input_array = np.copy(input_array)
-        norm_input_arrays.append(norm_input_array)
-            
-    max_norm_input_array = np.max([np.max(x) for x in norm_input_arrays])
-    for m, norm_input_array in enumerate(norm_input_arrays):
-        norm_input_array /= max_norm_input_array
-            
-    for m, norm_input_array in enumerate(norm_input_arrays):
-
-        trial_ts = []
-        t_end = np.max(time_array)
-        for i in range(n_trials):
-            trial_t = np.copy(time_array)
-            trial_t += i*(t_end + trial_dt)
-            trial_ts.append(trial_t)
-        all_t = np.concatenate(trial_ts)
-
-        this_input_ip_dict = {}
-        if nsample is None:
-            idxs = range(input_array.shape[1])
-        else:
-            local_random = np.random.default_rng(sample_seed)
-            idxs = local_random.choice(range(input_array.shape[1]), size=nsample, replace=False)
-            
-        for i in tqdm(idxs):
-            u_obs = np.tile(norm_input_array[:,i] * peak_rate, n_trials)
-            input_rate_ip  = Akima1DInterpolator(all_t, u_obs)
-            this_input_ip_dict[i] = input_rate_ip
-
-        input_ip_dict[m] = this_input_ip_dict
-            
-    return input_ip_dict
-
-
-def generate_const_input_ip(time_array, n, peak_rate=1., basis_function='inverse', n_trials=1):
-
-    dt = 0.001
-    trial_ts = []
-    t_end = np.max(time_array)
-    for i in range(n_trials):
-        trial_t = np.copy(time_array)
-        trial_t += i*(t_end + dt)
-        trial_ts.append(trial_t)
-    all_t = np.concatenate(trial_ts)
-
-    input_ip_dict = {}
-    for i in tqdm(range(n)):
+    local_random = np.random.RandomState(seed)
         
-        u_obs = np.ones((len(all_t),)) * peak_rate
-        
-        #input_rate_ip  = Rbf(all_t, u_obs, function=basis_function)
-        input_rate_ip  = PchipInterpolator(all_t, u_obs)
-        input_ip_dict[i] = input_rate_ip
-            
-    return input_ip_dict
+    srf_output_coords = coords['srf_output']
+    srf_exc_coords = coords['srf_exc']
+    srf_inh_coords = coords['srf_inh']
 
+    decoder_coords = coords['decoder']
+    decoder_inh_coords = coords['decoder_inh']
 
-def generate_trajectory_inputs(input_time_array, encoded_inputs, n_trials = 1, peak_rate = 1.):
-                               
-    print("Generating inputs...")
-    n_sample = len(encoded_inputs[0])
-    print("n_sample = %d" % n_sample)
-    exc_input_ip_dict = generate_input_ip(input_time_array[:n_sample], encoded_inputs,
-                                          peak_rate=peak_rate, n_trials=n_trials)
+    n_inputs = np.product(inputs.shape[1:])
+    n_outputs = srf_output_coords.shape[0]
+    n_exc = srf_exc_coords.shape[0]
+    n_inh = srf_inh_coords.shape[0]
+    n_inh_decoder = decoder_inh_coords.shape[0]
     
-    exc_trajectory_inputs = []
+    autoencoder_network = nengo.Network(label="Learning with spatial receptive fields", seed=seed)
 
-    t_end = np.max(input_time_array[:n_sample]) * n_trials
+    with autoencoder_network as model:
 
-    for m in sorted(exc_input_ip_dict.keys()):
-        for i in sorted(exc_input_ip_dict[m].keys()):
-            input_rates_ip = exc_input_ip_dict[m][i]
-            exc_trajectory_inputs.append(input_rates_ip)
+        srf_network = PRF(exc_input_func = partial(array_input, inputs, dt),
+                          connect_exc_inh_input = True,
+                          connect_out_out = False,
+                          n_excitatory = n_exc,
+                          n_inhibitory = n_inh,
+                          n_outputs = n_outputs,
 
-    return exc_trajectory_inputs
+                          output_coordinates = srf_output_coords,
+                          exc_coordinates = srf_exc_coords,
+                          inh_coordinates = srf_inh_coords,
+                          
+                          w_initial_E = params['w_initial_E'],
+                          w_initial_I = params['w_initial_I'],
+                          w_initial_EI = params['w_initial_EI'],
+                          w_EI_Ext = params['w_EI_Ext'],
+                          p_E = params['p_E_srf'],
+                          p_EE = params['p_EE'],
+                          p_EI_Ext = params['p_EI_Ext'],
+                          p_EI = params['p_EI'],
+                          tau_E = params['tau_E'],
+                          tau_I = params['tau_I'],
+                          tau_input = params['tau_input'],
+                          learning_rate_I=params['learning_rate_I'],
+                          learning_rate_E=params['learning_rate_E'],
 
-
-def plot_input_rates(input_rate_ips, t_end, dt=0.001, num=None):
-    sim_t = np.arange(0., t_end, dt)
-    rates = []
-    if num is not None:
-        input_rate_ips = input_rate_ips[:num]
-    for input_rate_ip in input_rate_ips:
-        rate = input_rate_ip(sim_t)
-        rates.append(rate)
-    rate_matrix = np.column_stack(rates)
-    plt.figure()
-    plt.imshow(rate_matrix.T, interpolation="nearest", aspect="auto",
-               extent=[0., t_end, 0, len(rates)])
-    plt.colorbar()
-    plt.show()
+                          isp_target_rate = 2.0,
+                          label="Spatial receptive field network",
+                          seed=seed)
         
-#plot_input_rates(exc_trajectory_inputs, t_end)
-#plot_input_rates(exc_trajectory_inputs, t_end, num=50)
-#plot_input_rates(inh_trajectory_inputs, t_end)
+        decoder = nengo.Ensemble(n_exc, dimensions=1,
+                                 neuron_type = nengo.SpikingRectifiedLinear(),
+                                 radius = 1,
+                                 intercepts=nengo.dists.Choice([0.1]),                                                 
+                                 max_rates=nengo.dists.Choice([40]))
 
-# In[5]:
+        decoder_inh =  nengo.Ensemble(n_inh, dimensions=1,
+                                      neuron_type = nengo.RectifiedLinear(),
+                                      radius = 1,
+                                      intercepts=nengo.dists.Choice([0.1]),                                                 
+                                      max_rates=nengo.dists.Choice([100]))
 
+        w_PV_E = params['w_PV_E']
+        p_PV = params['p_PV']
+        weights_initial_PV_E = local_random.uniform(size=n_outputs*n_exc).reshape((n_exc, n_outputs)) * w_PV_E
+        for i in range(n_exc):
+            dist = cdist(decoder_coords[i,:].reshape((1,-1)), srf_output_coords).flatten()
+            sigma = 1
+            prob = distance_probs(dist, sigma)    
+            sources = np.asarray(local_random.choice(n_outputs, round(p_PV * n_outputs), replace=False, p=prob), dtype=np.int32)
+            weights_initial_PV_E[i, np.logical_not(np.in1d(range(n_outputs), sources))] = 0.
 
-def autoenc_input(input_ips, t, *args):
-    activity = np.asarray([ y(t) for y in input_ips ])
-    on = np.maximum(0., activity)
-    off = np.maximum(0., -activity)
-    return np.concatenate([on, off])
+        conn_PV_E = nengo.Connection(srf_network.output.neurons,
+                                     decoder.neurons,
+                                     transform=weights_initial_PV_E,
+                                     synapse=nengo.Alpha(params['tau_E']))
 
-
-def make_model(exc_trajectory_inputs, N_Outputs = 50, N_Inh = 250, seed=19):
+        w_PV_I = params['w_PV_I']
+        weights_initial_PV_I = local_random.uniform(size=n_inh*n_outputs).reshape((n_inh, n_outputs)) * w_PV_I
+        for i in range(n_inh_decoder):
+            dist = cdist(decoder_inh_coords[i,:].reshape((1,-1)), srf_output_coords).flatten()
+            sigma = 1
+            prob = distance_probs(dist, sigma)    
+            sources = np.asarray(local_random.choice(n_outputs, round(p_PV * n_outputs), replace=False, p=prob), dtype=np.int32)
+            weights_initial_PV_I[i, np.logical_not(np.in1d(range(n_outputs), sources))] = 0.
+        conn_PV_I = nengo.Connection(srf_network.output.neurons,
+                                     decoder_inh.neurons,
+                                     transform=weights_initial_PV_I,
+                                     synapse=nengo.Alpha(params['tau_E']))
     
-    N_Exc = len(exc_trajectory_inputs)*2
+        w_decoder_I = params['w_initial_I']
+        weights_initial_decoder_I = local_random.uniform(size=n_inh*n_exc).reshape((n_exc, n_inh)) * w_decoder_I
 
-    srf_network = PRF(exc_input_func = partial(autoenc_input, exc_trajectory_inputs),
-                  connect_exc_inh_input = True,
-                  n_excitatory = N_Exc,
-                  n_inhibitory = N_Inh,
-                  n_outputs = N_Outputs,
-                  w_initial_E = 4e-2,
-                  w_initial_I = -5e-2,
-                  w_initial_EI = 5e-4,
-                  w_EI_Ext = 1e-3,
-                  p_EI_Ext = 0.25,
-                  p_E = 0.3,
-                  tau_E = 0.01,
-                  tau_I = 0.03,
-                  tau_input = 0.1,
-                  isp_target_rate = 2.0,
-                  label="Spatial receptive field network",
-                  seed=seed)
+        conn_decoder_I = nengo.Connection(decoder_inh.neurons,
+                                          decoder.neurons,
+                                          transform=weights_initial_decoder_I,
+                                          synapse=nengo.Alpha(params['tau_I']),
+                                          learning_rule_type=CDISP(learning_rate=0.025))
+    
+        coincidence_detection = nengo.Node(size_in=2*n_inputs, size_out=n_inputs,
+                                           output=lambda t,x: np.subtract(x[:n_inputs], x[n_inputs:]))
+        nengo.Connection(coincidence_detection, conn_decoder_I.learning_rule)
+        nengo.Connection(srf_network.exc.neurons, coincidence_detection[:n_inputs])
+        nengo.Connection(decoder.neurons, coincidence_detection[n_inputs:])
 
-    with srf_network:
-        p_output_spikes = nengo.Probe(srf_network.output.neurons, 'spikes', synapse=None)
-        p_exc_rates = nengo.Probe(srf_network.exc.neurons, 'rates')
-        p_inh_rates = nengo.Probe(srf_network.inh.neurons, 'rates')
-        p_inh_weights = nengo.Probe(srf_network.conn_I, 'weights')
-        p_exc_weights = nengo.Probe(srf_network.conn_E, 'weights')
-        if srf_network.conn_EE is not None:
-            p_rec_weights = nengo.Probe(srf_network.conn_EE, 'weights')
+        p_srf_rec_weights = None
+        with srf_network:
+            p_srf_output_spikes = nengo.Probe(srf_network.output.neurons, 'output', synapse=None)
+            p_srf_exc_rates = nengo.Probe(srf_network.exc.neurons, 'output')
+            p_srf_inh_rates = nengo.Probe(srf_network.inh.neurons, 'output')
+            #p_srf_inh_weights = nengo.Probe(srf_network.conn_I, 'weights')
+            #p_srf_exc_weights = nengo.Probe(srf_network.conn_E, 'weights')
+            #if srf_network.conn_EE is not None:
+            #    p_srf_rec_weights = nengo.Probe(srf_network.conn_EE, 'weights')
+                
+        p_decoder_spikes = nengo.Probe(decoder.neurons, synapse=None)
+        p_decoder_inh_rates = nengo.Probe(decoder_inh.neurons, synapse=None)
 
-    return srf_network
+    return { 'network': autoencoder_network,
+             'neuron_probes': {'srf_output_spikes': p_srf_output_spikes,
+                               'srf_exc_rates': p_srf_exc_rates,
+                               'srf_inh_rates': p_srf_inh_rates,
+                               'decoder_spikes': p_decoder_spikes,
+                               'decoder_inh_rates': p_decoder_inh_rates},
+#             'weight_probes': {'srf_inh_weights': p_srf_inh_weights,
+#                               'srf_exc_weights': p_srf_exc_weights,
+#                               'srf_rec_weights': p_srf_rec_weights}
+    }
 
-def run(model, t_end):
-    with nengo.Simulator(model, optimize=True) as sim:
+
+def run(model_dict, t_end, dt=0.001, save_results=False):
+        
+    with nengo.Simulator(model_dict['network'], optimize=True, dt=dt, progress_bar=TerminalProgressBar()) as sim:
         sim.run(np.max(t_end))
-    
-    output_spikes = sim.data[p_output_spikes]
-    np.save("srf_output_spikes", np.asarray(output_spikes, dtype=np.float32))
-    np.save("srf_time_range", np.asarray(sim.trange(), dtype=np.float32))
-    output_rates = rates_kernel(sim.trange(), output_spikes, tau=0.1)
 
-    return sim.trange(), output_spikes, output_rates
+    p_srf_output_spikes = model_dict['neuron_probes']['srf_output_spikes']
+    p_srf_exc_rates = model_dict['neuron_probes']['srf_exc_rates']
+    p_srf_inh_rates = model_dict['neuron_probes']['srf_inh_rates']
+    p_decoder_spikes = model_dict['neuron_probes']['decoder_spikes']
+    p_decoder_inh_rates = model_dict['neuron_probes']['decoder_inh_rates']
+    srf_output_spikes = sim.data[p_srf_output_spikes]
+    srf_exc_rates = sim.data[p_srf_exc_rates]
+    srf_inh_rates = sim.data[p_srf_inh_rates]
+    decoder_spikes = sim.data[p_decoder_spikes]
+    decoder_inh_rates = sim.data[p_decoder_inh_rates]
+    srf_output_rates = rates_kernel(sim.trange(), srf_output_spikes, tau=0.1)
+    srf_decoder_rates = rates_kernel(sim.trange(), decoder_spikes, tau=0.1)
+    if save_results:
+        np.save("srf_autoenc_exc_rates", np.asarray(srf_exc_rates, dtype=np.float32))
+        np.save("srf_autoenc_inh_rates", np.asarray(srf_inh_rates, dtype=np.float32))
+        np.save("srf_autoenc_output_spikes", np.asarray(srf_output_spikes, dtype=np.float32))
+        np.save("srf_autoenc_decoder_spikes", np.asarray(decoder_spikes, dtype=np.float32))
+        np.save("srf_autoenc_output_rates", np.asarray(srf_output_rates, dtype=np.float32))
+        np.save("srf_autoenc_decoder_rates", np.asarray(decoder_rates, dtype=np.float32))
+        np.save("srf_autoenc_time_range", np.asarray(sim.trange(), dtype=np.float32))
 
-if __name__ == '__main__':
-    n_sample = 400
-    input_time_array, all_data, encoded_inputs, encoder  = prepare_input_data(default_data_prefix, n_sample=n_sample)
-    t_end = np.max(input_time_array[:n_sample])
-    exc_trajectory_inputs = generate_trajectory_inputs(input_time_array, encoded_inputs,
-                                                       n_trials = 3, peak_rate = 1.)
-    model = make_model(exc_trajectory_inputs, N_Outputs = 50, N_Inh = 250, seed=19)
-    run(model, t_end)
-    
-    
-#sorted_idxs = np.argsort(-np.argmax(output_rates[53144:].T, axis=1))
+    return {'srf_autoenc_output_rates': srf_output_rates,
+            'srf_autoenc_decoder_rates': decoder_rates,
+            'srf_autoenc_exc_rates': srf_exc_rates,
+            'srf_autoenc_inh_rates': srf_inh_rates,
+            'srf_autoenc_output_spikes': srf_output_spikes,
+            'srf_autoenc_decoder_spikes': decoder_spikes,
 
-#output_rates = sim.data[p_output_rates]
-#plot_spikes(sim.trange(), sim.data[p_inh_rates][0,:])
-
-
-
+            
+    }
