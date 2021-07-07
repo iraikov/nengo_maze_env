@@ -32,9 +32,6 @@ n_samples = dof_input_matrix.shape[-1]
 n_x = dof_input_matrix.shape[0]*2
 n_y = dof_input_matrix.shape[1]
 
-dof_input_flat = dof_input_matrix.reshape((-1, n_samples))
-cnt_input_flat = cnt_input_matrix.reshape((-1, n_samples))
-
 n_steps = 100
 n_trials = 3
 input_matrix = np.vstack((dof_input_flat, cnt_input_flat))

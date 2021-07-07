@@ -1,4 +1,4 @@
-
+from functools import partial
 from nengo.exceptions import SimulationError, ValidationError, BuildError
 from nengo.neurons import LIF, LIFRate
 from nengo.builder import Builder, Operator, Signal
@@ -9,8 +9,9 @@ from nengo.params import (NumberParam, BoolParam)
 from nengo.builder.operator import DotInc, ElementwiseInc, Copy, Reset
 from nengo.connection import LearningRule
 from nengo.ensemble import Ensemble, Neurons
-import numba
 from numba import jit, prange
+import jax
+import jax.numpy as jnp
 
 
 # Creates new learning rule for inhibitory plasticity (ISP).
@@ -55,13 +56,18 @@ class ISP(LearningRuleType):
     def _argreprs(self):
         return _remove_default_post_synapse(super()._argreprs, self.pre_synapse)
 
-@jit(nopython=True)
-def step_jit(kappa, rho0, post_filtered, pre_filtered, weights, mask, delta):
-    for i in prange(weights.shape[0]):
-        delta[i,:] = -kappa * pre_filtered * mask[i,:] * (post_filtered[i] - rho0)
-        delta_sum = np.add(delta[i,:], weights[i,:]).reshape((-1,))
-        sat = np.nonzero(delta_sum >= 0)[0]
-        delta[i][sat] = 0.
+@jax.jit
+def step_jit(kappa, rho0, pre_filtered, post_filtered, weights, delta):
+    d = -kappa * pre_filtered * (post_filtered - rho0)
+    delta_sum = jnp.add(delta, weights).reshape((-1, ))
+    return jnp.where(delta_sum >= 0, 0., d)
+
+@jax.jit
+def apply_step_jit(kappa, rho0, pre_filtered, post_filtered, weights, delta):
+    step_vv = jax.vmap(partial(step_jit, kappa, rho0, pre_filtered))
+    return step_vv(post_filtered, weights, delta)
+
+
     
 
 # Builders for ISP
@@ -163,7 +169,7 @@ class SimISP(Operator):
             #    delta[i,:] = -kappa * pre_filtered * mask[i,:] * (post_filtered[i] - rho0)
             #    delta_sum = np.add(delta[i,:], weights[i,:])
             if jit:
-                step_jit(kappa, rho0, post_filtered, pre_filtered, weights, mask, delta)
+                delta[:, :] = apply_step_jit(kappa, rho0, pre_filtered, post_filtered, weights, delta) * mask
             else:
                 a = -kappa * (post_filtered - rho0)
                 np.multiply(self.mask, pre_filtered, out=delta)

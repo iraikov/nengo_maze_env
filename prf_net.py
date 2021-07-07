@@ -33,9 +33,9 @@ class PRF(nengo.Network):
                  w_II = -1e-3, # weight of inhibitory to inhibitory connections (when connect_inh_inh_input = True)
                  w_EI_Ext = 1e-3, # weight of excitatory connection to inhibitory inputs (when connect_exc_inh_input = True)
                  w_input = 1,
-                 p_E = 0.4, # uniform probability of connection of excitatory inputs to outputs
-                 p_EI = 0.4, # uniform probability of feedback connections to inhibitory cells
-                 p_EE = 0.1, # uniform probability of recurrent connections
+                 p_E = 0.3, # uniform probability of connection of excitatory inputs to outputs
+                 p_EI = 0.2, # uniform probability of feedback connections to inhibitory cells
+                 p_EE = 0.05, # uniform probability of recurrent connections
                  p_EI_Ext = 0.25, # uniform probability of excitatory connection to inhibitory inputs (when connect_exc_inh_input = True)
                  p_E_Fb = 0.05, # uniform probability of outputs to excitatory inputs (when connect_exc_fb = True)
                  p_II = 0.05, # uniform probability of inhibitory to inhibitory inputs (when connect_inh_inh = True)
@@ -53,6 +53,7 @@ class PRF(nengo.Network):
                  connect_exc_inh_input = False,
                  connect_inh_inh = False,
                  connect_exc_fb = False,
+                 connect_out_out = True,
                  use_gdhl = False,
                  gdhl_sigma = { 'pp': 0.1, 'np': -0.1, 'pn': -0.1, 'nn': 0.1 },
                  gdhl_eta = { 'ps': 0.0, 'ns': 0.0, 'sp': 0.0, 'sn': 0.0 },
@@ -132,10 +133,12 @@ class PRF(nengo.Network):
                 target_choices = np.asarray([ j for j in range(n_outputs) if i != j ])
                 dist = cdist(self.output_coordinates[i,:].reshape((1,-1)), self.output_coordinates[target_choices]).flatten()
                 sigma = sigma_scale * p_EE * n_outputs
+
                 prob = distance_probs(dist, sigma)
                 targets_Out = np.asarray(rng.choice(target_choices, round(p_EE * n_outputs), replace=False, p=prob),
                                         dtype=np.int32)
                 weights_initial_EE[i, np.logical_not(np.in1d(range(n_outputs), targets_Out))] = 0.
+            print(np.min(weights_initial_EE))
 
         with self:
 
@@ -211,8 +214,8 @@ class PRF(nengo.Network):
                                             self.inh.neurons,
                                             transform=weights_initial_EI,
                                             synapse=nengo.Alpha(tau_EI))
-            
-            if self.n_outputs > 1:
+
+            if connect_out_out and (self.n_outputs > 1):
                 self.conn_EE = nengo.Connection(self.output.neurons, 
                                                 self.output.neurons, 
                                                 transform=weights_initial_EE,

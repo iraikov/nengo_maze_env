@@ -178,8 +178,8 @@ def plot_input_rates(input_rates_dict):
         plt.colorbar()
         plt.show()
         
-#plot_input_rates(exc_input_rates_dict)
-#plot_input_rates(inh_input_rates_dict)
+plot_input_rates(exc_input_rates_dict)
+plot_input_rates(inh_input_rates_dict)
 
 # In[5]:
 
@@ -207,7 +207,8 @@ srf_network = PRF(exc_input_func = partial(trajectory_input, exc_trajectory_inpu
                   n_excitatory = N_Exc,
                   n_inhibitory = N_Inh,
                   n_outputs = N_Outputs,
-                  connect_exc_fb = True,
+                  sigma_scale = 0.01,
+                  p_EE = 0.05,
                   label="Spatial receptive field network",
                   seed=seed)
 
@@ -218,14 +219,26 @@ with srf_network:
     p_rec_weights = nengo.Probe(srf_network.conn_EE, 'weights', sample_every=1.0)
     p_exc_rates = nengo.Probe(srf_network.exc.neurons)
     p_inh_rates = nengo.Probe(srf_network.inh.neurons)
-    
+
+print(f"t_max = {np.max(trj_t)}")    
 with nengo.Simulator(srf_network, optimize=True) as sim:
     sim.run(np.max(trj_t))
-    
+
+
+rec_weights = sim.data[p_rec_weights]
+exc_weights = sim.data[p_exc_weights]
+inh_weights = sim.data[p_inh_weights]
+exc_rates = sim.data[p_exc_rates]
+inh_rates = sim.data[p_inh_rates]
 output_spikes = sim.data[p_output_spikes]
 np.save("srf_output_spikes", np.asarray(output_spikes, dtype=np.float32))
 np.save("srf_time_range", np.asarray(sim.trange(), dtype=np.float32))
 output_rates = rates_kernel(sim.trange(), output_spikes, tau=0.1)
+np.save("srf_output_rates", np.asarray(output_rates, dtype=np.float32))
+np.save("srf_exc_rates", np.asarray(exc_rates, dtype=np.float32))
+np.save("srf_inh_rates", np.asarray(inh_rates, dtype=np.float32))
+np.save("exc_weights", np.asarray(exc_weights, dtype=np.float32))
+
 #output_rates = sim.data[p_output_rates]
 #plot_spikes(sim.trange(), sim.data[p_inh_rates][0,:])
 

@@ -1,4 +1,4 @@
-
+from functools import partial
 from nengo.exceptions import SimulationError, ValidationError, BuildError
 from nengo.neurons import LIF, LIFRate
 from nengo.builder import Builder, Operator, Signal
@@ -9,10 +9,8 @@ from nengo.params import (NumberParam, BoolParam)
 from nengo.builder.operator import DotInc, ElementwiseInc, Copy, Reset
 from nengo.connection import LearningRule
 from nengo.ensemble import Ensemble, Neurons
-import numba
-from numba import jit, prange
-
-numba.config.THREADING_LAYER = 'threadsafe'
+import jax
+import jax.numpy as jnp
 
 # Creates new learning rule for Hebbian synaptic plasticity (HSP).
 # Based on the paper:
@@ -54,21 +52,28 @@ class HSP(LearningRuleType):
     @property
     def _argreprs(self):
         return _remove_default_post_synapse(super()._argreprs, self.pre_synapse)
+    
+@jax.jit
+def step_undirected_jit(kappa, pre_filtered, post_filtered, weights):
+    factor = 1.0 - (jnp.square(weights) / jnp.dot(weights, weights))
+    return kappa * factor * pre_filtered * post_filtered
 
-@jit(nopython=True, parallel=True)
-def step_jit(kappa, post_filtered, pre_filtered, weights, sgn, mask, delta, directed):
-    for i in prange(weights.shape[0]):
-        weights_i = weights[i]
-        idxs = np.argwhere(mask[i,:]).ravel()
-        factor = 1.0 - ((weights_i[idxs] * weights_i[idxs].T) / np.dot(weights_i[idxs], weights_i[idxs]))
-        if directed:
-            lt = np.argwhere(pre_filtered < post_filtered[i])
-            if len(lt) > 0:
-                for j in range(lt.shape[0]):
-                    sgn[i,j] = -1
-        sgn_i = sgn[i]
-        dw = sgn_i[idxs] * kappa * factor * pre_filtered[idxs] * post_filtered[i]
-        delta[i][idxs] = dw
+@jax.jit
+def step_directed_jit(kappa, pre_filtered, post_filtered, weights):
+    factor = 1.0 - (jnp.square(weights) / jnp.dot(weights, weights))
+    sgn = jnp.where(pre_filtered < post_filtered, -1, 1)
+    return sgn * kappa * factor * pre_filtered * post_filtered
+    
+@jax.jit
+def apply_step_undirected_jit(kappa, post_filtered, pre_filtered, weights):
+    step_vv = jax.vmap(partial(step_undirected_jit, kappa, pre_filtered))
+    return step_vv(post_filtered, weights)
+
+@jax.jit
+def apply_step_directed_jit(kappa, post_filtered, pre_filtered, weights):
+    step_vv = jax.vmap(partial(step_directed_jit, kappa, pre_filtered))
+    return step_vv(post_filtered, weights)
+        
      
 
 # Builders for HSP
@@ -121,10 +126,11 @@ class SimHSP(Operator):
         self.reads = [pre_filtered, post_filtered, weights]
         self.updates = [delta]
         assert(np.all(np.linalg.norm(weights.initial_value, axis=1) > 0.))
-        self.mask = np.logical_not(np.isclose(weights.initial_value, 0.))
         self.sgn = np.ones(weights.initial_value.shape)
         self.directed = directed
         self.jit = jit
+        self.mask = np.logical_not(np.isclose(weights.initial_value, 0.))
+            
         
     @property
     def delta(self):
@@ -164,10 +170,14 @@ class SimHSP(Operator):
         
         def step_simhsp():
 
-            sgn[:,:] = 1
             if jit:
-                step_jit(kappa, post_filtered, pre_filtered, weights, sgn, mask, delta, directed)
+                if directed:
+                    dw = apply_step_directed_jit(kappa, post_filtered, pre_filtered, weights)
+                else:
+                    dw = apply_step_undirected_jit(kappa, post_filtered, pre_filtered, weights)
+                delta[:, :] = np.clip(dw * mask, 0., None)
             else:
+                sgn[:,:] = 1
                 for i in range(weights.shape[0]):
                     factor = 1.0 - ((weights[i,:] * weights[i,:].T) / np.dot(weights[i,:], weights[i,:]))
                     if directed:
@@ -175,7 +185,7 @@ class SimHSP(Operator):
                         if len(lt) > 0:
                             for j in range(lt.shape[0]):
                                 sgn[i,j] = -1
-                    delta[i,:] = sgn[i,:] * kappa * factor * pre_filtered * mask[i,:] * post_filtered[i]
+                    delta[i,:] = np.clip(sgn[i,:] * kappa * factor * pre_filtered * mask[i,:] * post_filtered[i], 0., None)
 
             
         return step_simhsp

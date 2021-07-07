@@ -26,25 +26,38 @@ def array_input(input_matrix, dt, t, *args):
     return input_matrix[i].ravel()
 
 
-def build_network(params, inputs, coords, seed=None, dt=0.001):
+def build_network(params, inputs, coords=None, n_outputs=None, n_exc=None, n_inh=None, n_inh_decoder=None, seed=0, dt=0.001):
     
-    if seed is None:
-        seed = 19
-
     local_random = np.random.RandomState(seed)
-        
-    srf_output_coords = coords['srf_output']
-    srf_exc_coords = coords['srf_exc']
-    srf_inh_coords = coords['srf_inh']
 
-    decoder_coords = coords['decoder']
-    decoder_inh_coords = coords['decoder_inh']
+    if coords is None:
+        coords = {}
+    
+    srf_output_coords = coords.get('srf_output', None)
+    srf_exc_coords = coords.get('srf_exc', None)
+    srf_inh_coords = coords.get('srf_inh', None)
+
+    decoder_coords = coords.get('decoder', None)
+    decoder_inh_coords = coords.get('decoder_inh', None)
 
     n_inputs = np.product(inputs.shape[1:])
-    n_outputs = srf_output_coords.shape[0]
-    n_exc = srf_exc_coords.shape[0]
-    n_inh = srf_inh_coords.shape[0]
-    n_inh_decoder = decoder_inh_coords.shape[0]
+    if srf_output_coords is not None:
+        n_outputs = srf_output_coords.shape[0]
+    if srf_exc_coords is not None:
+        n_exc = srf_exc_coords.shape[0]
+    if srf_inh_coords is not None:
+        n_inh = srf_inh_coords.shape[0]
+    if decoder_inh_coords is not None:
+        n_inh_decoder = decoder_inh_coords.shape[0]
+
+    if n_outputs is None:
+        raise RuntimeError("n_outputs is not provided and srf_output coordinates are not provided")
+    if n_exc is None:
+        raise RuntimeError("n_exc is not provided and srf_exc coordinates are not provided")
+    if n_inh is None:
+        raise RuntimeError("n_exc is not provided and srf_inh coordinates are not provided")
+    if n_inh_decoder is None:
+        raise RuntimeError("n_inh_decoder is not provided and decoder_inh coordinates are not provided")
     
     autoencoder_network = nengo.Network(label="Learning with spatial receptive fields", seed=seed)
 
