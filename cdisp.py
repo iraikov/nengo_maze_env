@@ -10,8 +10,9 @@ from nengo.params import (NumberParam, BoolParam)
 from nengo.builder.operator import DotInc, ElementwiseInc, Copy, Reset
 from nengo.connection import LearningRule
 from nengo.ensemble import Ensemble, Neurons
-import numba
-from numba import jit, prange
+import jax
+import jax.numpy as jnp
+
 
 
 # Creates new learning rule for coincidence detecting inhibitory plasticity (CDISP).
@@ -50,16 +51,16 @@ class CDISP(LearningRuleType):
     def _argreprs(self):
         return _remove_default_post_synapse(super()._argreprs, self.pre_synapse)
 
-@jit(nopython=True)
-def step_jit(kappa, error_filtered, post_filtered, pre_filtered, weights, mask, delta):
-    for i in prange(weights.shape[0]):
-        idxs = np.argwhere(mask[i,:]).ravel()
-        dw = -kappa * pre_filtered[idxs] * error_filtered[i]
-        weights_i = weights[i]
-        dw_sum = np.add(dw, weights_i[idxs]).reshape((-1,))
-        sat = np.nonzero(dw_sum >= 0)[0]
-        dw[sat] = 0.
-        delta[i][idxs] = dw
+@jax.jit
+def step_jit(kappa, pre_filtered, error_filtered, post_filtered, weights):
+    d = -kappa * pre_filtered * error_filtered
+    delta_sum = jnp.add(d, weights).reshape((-1, ))
+    return jnp.where(delta_sum >= 0, 0., d)
+
+@jax.jit
+def apply_step_jit(kappa, pre_filtered, error_filtered, post_filtered, weights):
+    step_vv = jax.vmap(partial(step_jit, kappa, pre_filtered, error_filtered))
+    return step_vv(post_filtered, weights)
     
 
 # Builders for ISP
@@ -161,7 +162,7 @@ class SimCDISP(Operator):
         
         def step_simcdisp():
             if jit:
-                step_jit(kappa, error_filtered, post_filtered, pre_filtered, weights, mask, delta)
+                delta[:, :] = apply_step_jit(kappa, pre_filtered, error_filtered, post_filtered, weights) * mask
             else:
                 a = -kappa * pre_filtered * self.mask * error_filtered
                 np.multiply(a, delta, out=delta)

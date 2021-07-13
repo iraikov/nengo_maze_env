@@ -60,7 +60,10 @@ class PRF(nengo.Network):
                  exc_coordinates = None,
                  inh_coordinates = None,
                  output_coordinates = None,
-                 sigma_scale = 0.1,
+                 sigma_scale_E = 0.1,
+                 sigma_scale_EE = 0.1,
+                 sigma_scale_EI = 0.1,
+                 sigma_scale_E_Fb = 0.1,
                  label = None,
                  seed = 0,
                  add_to_container = None,
@@ -108,7 +111,7 @@ class PRF(nengo.Network):
             weights_initial_E = rng.uniform(size=n_outputs*n_excitatory).reshape((n_outputs, n_excitatory)) * w_initial_E
             for i in range(n_outputs):
                 dist = cdist(self.output_coordinates[i,:].reshape((1,-1)), self.exc_coordinates).flatten()
-                sigma = sigma_scale * p_E * n_excitatory
+                sigma = sigma_scale_E * p_E * n_excitatory
                 prob = distance_probs(dist, sigma)
                 sources_Exc = np.asarray(rng.choice(n_excitatory, round(p_E * n_excitatory), replace=False, p=prob),
                                          dtype=np.int32)
@@ -119,7 +122,7 @@ class PRF(nengo.Network):
         weights_initial_EI = rng.uniform(size=n_outputs*n_inhibitory).reshape((n_inhibitory, n_outputs)) * w_initial_EI
         for i in range(n_inhibitory):
             dist = cdist(self.inh_coordinates[i,:].reshape((1,-1)), self.output_coordinates).flatten()
-            sigma = sigma_scale * p_EI * n_outputs
+            sigma = sigma_scale_EI * p_EI * n_outputs
             prob = distance_probs(dist, sigma)
             sources_Out = np.asarray(rng.choice(n_outputs, round(p_EI * n_outputs), replace=False, p=prob),
                                          dtype=np.int32)
@@ -132,7 +135,7 @@ class PRF(nengo.Network):
             for i in range(n_outputs):
                 target_choices = np.asarray([ j for j in range(n_outputs) if i != j ])
                 dist = cdist(self.output_coordinates[i,:].reshape((1,-1)), self.output_coordinates[target_choices]).flatten()
-                sigma = sigma_scale * p_EE * n_outputs
+                sigma = sigma_scale_EE * p_EE * n_outputs
 
                 prob = distance_probs(dist, sigma)
                 targets_Out = np.asarray(rng.choice(target_choices, round(p_EE * n_outputs), replace=False, p=prob),
@@ -232,7 +235,7 @@ class PRF(nengo.Network):
                     weights_initial_E_Fb = rng.uniform(size=(n_excitatory*n_outputs)).reshape((n_excitatory, n_outputs))
                     for i in range(n_excitatory):
                         dist = cdist(self.exc_coordinates[i,:].reshape((1,-1)), self.output_coordinates).flatten()
-                        sigma = sigma_scale * p_E_Fb * n_outputs
+                        sigma = sigma_scale_E_Fb * p_E_Fb * n_outputs
                         prob = distance_probs(dist, sigma)
                         sources_Out = np.asarray(rng.choice(n_outputs, round(p_E_Fb * n_outputs), replace=False, p=prob), dtype=np.int32)
                         weights_initial_E_Fb[i, np.logical_not(np.in1d(range(n_outputs), sources_Out))] = 0.

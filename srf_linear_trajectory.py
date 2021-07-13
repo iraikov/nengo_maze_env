@@ -207,8 +207,8 @@ srf_network = PRF(exc_input_func = partial(trajectory_input, exc_trajectory_inpu
                   n_excitatory = N_Exc,
                   n_inhibitory = N_Inh,
                   n_outputs = N_Outputs,
-                  sigma_scale = 0.01,
-                  p_EE = 0.05,
+                  sigma_scale_E = 0.005,
+                  p_EE = 0.02,
                   label="Spatial receptive field network",
                   seed=seed)
 
@@ -219,6 +219,23 @@ with srf_network:
     p_rec_weights = nengo.Probe(srf_network.conn_EE, 'weights', sample_every=1.0)
     p_exc_rates = nengo.Probe(srf_network.exc.neurons)
     p_inh_rates = nengo.Probe(srf_network.inh.neurons)
+
+with nengo.Simulator(srf_network, optimize=True) as sim:
+    sim.run(0.01)
+    
+exc_weights = srf_network.conn_E.transform
+inh_weights = srf_network.conn_I.transform
+rec_weights = srf_network.conn_EE.transform
+
+plt.imshow(np.asarray(exc_weights.sample()).T, aspect="auto", interpolation="nearest")
+plt.colorbar()
+plt.show()
+plt.imshow(np.asarray(rec_weights.sample()).T, aspect="auto", interpolation="nearest")
+plt.colorbar()
+plt.show()
+plt.imshow(np.asarray(inh_weights.sample()).T, aspect="auto", interpolation="nearest")
+plt.colorbar()
+plt.show()
 
 print(f"t_max = {np.max(trj_t)}")    
 with nengo.Simulator(srf_network, optimize=True) as sim:
@@ -238,8 +255,13 @@ np.save("srf_output_rates", np.asarray(output_rates, dtype=np.float32))
 np.save("srf_exc_rates", np.asarray(exc_rates, dtype=np.float32))
 np.save("srf_inh_rates", np.asarray(inh_rates, dtype=np.float32))
 np.save("exc_weights", np.asarray(exc_weights, dtype=np.float32))
+np.save("rec_weights", np.asarray(rec_weights, dtype=np.float32))
+np.save("inh_weights", np.asarray(inh_weights, dtype=np.float32))
 
-#output_rates = sim.data[p_output_rates]
+sorted_idxs = np.argsort(-np.argmax(output_rates[39280:].T, axis=1))
+plt.imshow(output_rates[:,sorted_idxs].T, aspect="auto", interpolation="nearest")
+plt.colorbar()
+plt.show()
 #plot_spikes(sim.trange(), sim.data[p_inh_rates][0,:])
 
 

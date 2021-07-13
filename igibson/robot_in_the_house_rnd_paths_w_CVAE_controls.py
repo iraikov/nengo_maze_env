@@ -1,0 +1,142 @@
+from gibson2.robots.turtlebot_robot import Turtlebot
+from gibson2.simulator import Simulator
+from gibson2.scenes.igibson_indoor_scene import InteractiveIndoorScene
+from gibson2.objects.ycb_object import YCBObject
+from gibson2.utils.utils import parse_config
+from gibson2.render.mesh_renderer.mesh_renderer_settings import MeshRendererSettings
+import numpy as np
+from gibson2.render.profiler import Profiler
+import gibson2
+import os
+import bezier
+import matplotlib.pyplot as plt
+from PIL import Image
+from tensorflow import keras
+
+def main():
+    config = parse_config(os.path.join(gibson2.example_config_path, 'turtlebot_demo.yaml')) #robot configuration file path
+    settings = MeshRendererSettings() #generating renderer settings object
+    
+    #generating simulator object
+    s = Simulator(mode='headless', #simulating without gui 
+    #s = Simulator(mode='gui', #simulating with gui
+                  image_width=64, #robot camera pixel width
+                  image_height=48, #robot camera pixel height
+                  vertical_fov=75, #robot camera view angle (from floor to ceiling 40 degrees)
+                  rendering_settings=settings)
+    
+    #generating scene object
+    scene = InteractiveIndoorScene('Benevolence_1_int', #scene name: Benevolence, floor number: 1, does it include interactive objects: yes (int). I pick Benevolence on purpose as it is the most memory friendly scene in the iGibson dataset. 
+                              build_graph=True, #builds the connectivity graph over the given facedown traversibility map (floor plan)
+                              waypoint_resolution=0.1, #radial distance between 2 consecutive waypoints (10 cm)
+                              trav_map_resolution=0.1,
+                              trav_map_erosion=2,
+                              should_open_all_doors=True,
+                              pybullet_load_texture=True) #do you want to include texture and material properties? (you need this for object interaction)
+
+    s.import_ig_scene(scene) #loading the scene object in the simulator object
+    turtlebot = Turtlebot(config) #generating the robot object
+    s.import_robot(turtlebot) #loading the robot object in the simulator object
+    init_pos = turtlebot.get_position() #getting the initial position of the robot base [X:meters, Y:meters, Z:meters] (base: robot's main body. it may have links and the associated joints too. links and joints have positions and orientations as well.)
+    init_or = turtlebot.get_rpy() #getting the initial Euler angles of the robot base [Roll: radians, Pitch: radians, Yaw: radians]
+
+    #sampling random goal states in a desired room of the apartment
+    np.random.seed(0)
+
+    encoder = keras.models.load_model('./CVAE_encoder')
+    decoder = keras.models.load_model('./CVAE_decoder')
+
+    for j in range(30):
+
+        goal1 = scene.get_random_point_by_room_type('living_room')[1] #sampling random points in the living room
+        goal2 = scene.get_random_point_by_room_type('living_room')[1]    
+        goal3 = scene.get_random_point_by_room_type('living_room')[1]    
+        goal4 = init_pos
+    
+        path1 = scene.get_shortest_path(0,init_pos[0:2],goal1[0:2],entire_path=True)[0] #generate the "entire" a* path between the initial, sub-goal, and terminal goal nodes
+        path2 = scene.get_shortest_path(0,goal1[0:2],goal2[0:2],entire_path=True)[0] 
+        path3 = scene.get_shortest_path(0,goal2[0:2],goal3[0:2],entire_path=True)[0] 
+        path4 = scene.get_shortest_path(0,goal3[0:2],goal4[0:2],entire_path=True)[0] 
+    
+        rnd_path = np.append(path1,path2[1:],axis=0)
+        rnd_path = np.append(rnd_path,path3[1:],axis=0)
+        rnd_path = np.append(rnd_path,path4[1:],axis=0)
+
+        #fitting a bezier curve through the a* waypoints and sampling 2000 points from that curve
+        path_nodes = np.asfortranarray([rnd_path[:,0].tolist(),rnd_path[:,1].tolist()])
+        smt_crv = bezier.Curve.from_nodes(path_nodes)
+        s_vals = np.linspace(0,1,2000)
+        smt_path = smt_crv.evaluate_multi(s_vals)
+        
+        #correcting the initial orientation of the robot
+        delta_pos = smt_path[:,1] - smt_path[:,0] #direction vector between 2 consecutive waypoints
+        delta_yaw = np.arctan2(delta_pos[1],delta_pos[0]) #the yaw angle of the robot base while following the sampled bezier path
+        delta_qua = e2q(init_or[0],init_or[1],delta_yaw) #transforming robot base Euler angles to quaternion
+        turtlebot.set_position_orientation([smt_path[0,0],smt_path[1,0],init_pos[2]], delta_qua) #setting the robot base position and the orientation
+
+        episode_path = os.getcwd() + '/episodes/episode_' + str(j).zfill(2) #path of the new episode folder
+        #os.makedirs(episode_path) #creating a new folder for the episode
+     
+        gtrth_pth_str = episode_path + '/episode_' + str(j).zfill(2) + 'ground_truth_path.csv' #printing the ground truth path out
+        #np.savetxt(gtrth_pth_str, np.atleast_2d(smt_path).T, delimiter=",")
+       
+        for i in range(len(smt_path[0])-1):
+            with Profiler('Simulator step'): #iGibson simulation loop requieres this context manager
+            
+                rgb_camera = np.array(s.renderer.render_robot_cameras(modes='rgb')) #probing RGB data, you can also probe rgbd or even optical flow if robot has that property in its config file (.yaml file)
+                robot_img = rgb_camera[0,:,:,0] #transforming the RGB probe to uint8 format (PIL.Image.fromarray() accepts that format)
+                encoded = encoder.predict(np.expand_dims(robot_img, axis=0))
+                decoded = decoder.predict(encoded[0])
+                robot_img = decoded[0,:,:,0]
+                robot_img = robot_img.astype('uint8')
+                robot_img = Image.fromarray(robot_img)
+                img_str = './iGib_recons' + '/episode_' + str(j).zfill(2) + '_frame_' + str(i).zfill(5) + '.jpeg'
+                robot_img.save(img_str)
+                #lidar = s.renderer.get_lidar_all() #probing 360 degrees lidar data
+
+                delta_pos = smt_path[:,i+1] - smt_path[:,i] #direction vector between 2 consecutive waypoints
+                delta_yaw = np.arctan2(delta_pos[1],delta_pos[0]) #the yaw angle of the robot base while following the sampled bezier path
+                delta_qua = e2q(init_or[0],init_or[1],delta_yaw) #transforming robot base Euler angles to quaternion
+                turtlebot.set_position_orientation([smt_path[0,i],smt_path[1,i],init_pos[2]], delta_qua) #setting the robot base position and the orientation
+		velcmd1, velcmd2 = PID_path_track(delta_pos, delta_qua)
+                turtlebot.set_motor_velocity([velcmd1,velcmd2])
+
+                s.step() #proceed one step ahead in simulation time
+    
+
+    s.disconnect()
+
+def e2q(roll, pitch, yaw): #Euler angles to quaternion transformation
+
+    qx = np.sin(roll/2) * np.cos(pitch/2) * np.cos(yaw/2) - np.cos(roll/2) * np.sin(pitch/2) * np.sin(yaw/2)
+
+   # for i in range(10000):
+    #    with Profiler('Simulator step'):
+     #       turtlebot.apply_action([0.5, -0.5])
+      #      s.step()
+       #     lidar = s.renderer.get_lidar_all()
+        #    print(lidar.shape)
+         #   # TODO: visualize lidar scan
+    qy = np.cos(roll/2) * np.sin(pitch/2) * np.cos(yaw/2) + np.sin(roll/2) * np.cos(pitch/2) * np.sin(yaw/2)
+    qz = np.cos(roll/2) * np.cos(pitch/2) * np.sin(yaw/2) - np.sin(roll/2) * np.sin(pitch/2) * np.cos(yaw/2)
+    qw = np.cos(roll/2) * np.cos(pitch/2) * np.cos(yaw/2) + np.sin(roll/2) * np.sin(pitch/2) * np.sin(yaw/2)
+
+    return [qx, qy, qz, qw]
+
+def q2e(x, y, z, w): #quaternion to Euler angles transformation
+
+    c23 = 2*(y*z+w*x)
+    c33 = (w*w-x*x-y*y+z*z)
+    roll = np.arctan2(c23, c33)
+
+    c13 =2*(x*z-w*y) 
+    pitch = (np.arcsin(c13))*(-1)
+
+    c12 = 2*(x*y+w*z)
+    c11 = (w*w+x*x-y*y-z*z)
+    yaw = np.arctan2(c12, c11)
+
+    return roll, pitch, yaw
+
+if __name__ == '__main__':
+    main()

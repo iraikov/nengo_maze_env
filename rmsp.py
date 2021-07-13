@@ -10,10 +10,9 @@ from nengo.synapses import (Lowpass, SynapseParam)
 from nengo.builder.operator import DotInc, ElementwiseInc, Copy, Reset
 from nengo.connection import LearningRule
 from nengo.ensemble import Ensemble, Neurons
-import numba
-from numba import jit, prange
+import jax
+import jax.numpy as jnp
 
-numba.config.THREADING_LAYER = 'threadsafe'
 
 # Creates new learning rule for reward-modulated synaptic plasticity (RMSP).
 # Based on the paper:
@@ -57,20 +56,19 @@ class RMSP(LearningRuleType):
         return _remove_default_post_synapse(super()._argreprs, self.pre_synapse)
 
     
+    
+@jax.jit
+def step_jit(kappa, reward, pre_filtered, post_filtered, weights):
+    factor = (1.0 - (jnp.square(weights) / jnp.dot(weights, weights))) * reward[0]
+    return kappa * factor * rdelta * pre_filtered * post_filtered
+    
+@jax.jit
+def apply_step_jit(kappa, post_filtered, pre_filtered, weights):
+    rdelta = pre_filtered - reward
+    step_vv = jax.vmap(partial(step_jit, kappa, reward, pre_filtered, rdelta))
+    return step_vv(post_filtered, weights)
 
-@jit(nopython=True, parallel=True, fastmath=True)
-def step_jit(kappa, post_filtered, pre_filtered, weights, reward, sgn, mask, delta):
-    rdelta = pre_filtered
-    for i in prange(rdelta.shape[0]):
-        rdelta[i] = rdelta[i] - reward[0]
-    for i in prange(weights.shape[0]):
-        weights_i = weights[i]
-        idxs = np.argwhere(mask[i,:]).ravel()
-        factor = (1.0 - ((weights_i[idxs] * weights_i[idxs].T) / np.dot(weights_i[idxs], weights_i[idxs]))) * reward[0]
-        sgn_i = sgn[i]
-        dw = rdelta[idxs] * sgn_i[idxs] * kappa * factor * pre_filtered[idxs] * post_filtered[i]
-        delta[i][idxs] = dw
-
+        
         
 # Builders for RMSP
 class SimRMSP(Operator):
@@ -127,7 +125,6 @@ class SimRMSP(Operator):
         self.updates = [delta]
         assert(np.all(np.linalg.norm(weights.initial_value, axis=1) > 0.))
         self.mask = np.logical_not(np.isclose(weights.initial_value, 0.))
-        self.sgn = np.ones(weights.initial_value.shape)
         self.jit = jit
         
     @property
@@ -167,13 +164,13 @@ class SimRMSP(Operator):
         weights = signals[self.weights]
         reward = signals[self.reward]
         mask = self.mask
-        sgn = self.sgn
         jit = self.jit
         
         def step_simrmsp():
 
             if jit:
-                step_jit(kappa, post_filtered, pre_filtered, weights, reward, sgn, mask, delta)
+                dw = apply_step_jit(kappa, post_filtered, pre_filtered, weights, reward, delta)
+                delta[:, :] = np.clip(dw * mask, 0., None)
             else:
                 rdelta = pre_filtered - reward
                 for i in range(weights.shape[0]):

@@ -174,7 +174,8 @@ def build_network(params, inputs, coords=None, n_outputs=None, n_exc=None, n_inh
 
 def run(model_dict, t_end, dt=0.001, save_results=False):
         
-    with nengo.Simulator(model_dict['network'], optimize=True, dt=dt, progress_bar=TerminalProgressBar()) as sim:
+    with nengo.Simulator(model_dict['network'], optimize=True, dt=dt,
+                         progress_bar=TerminalProgressBar()) as sim:
         sim.run(np.max(t_end))
 
     p_srf_output_spikes = model_dict['neuron_probes']['srf_output_spikes']

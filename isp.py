@@ -57,15 +57,15 @@ class ISP(LearningRuleType):
         return _remove_default_post_synapse(super()._argreprs, self.pre_synapse)
 
 @jax.jit
-def step_jit(kappa, rho0, pre_filtered, post_filtered, weights, delta):
+def step_jit(kappa, rho0, pre_filtered, post_filtered, weights):
     d = -kappa * pre_filtered * (post_filtered - rho0)
-    delta_sum = jnp.add(delta, weights).reshape((-1, ))
+    delta_sum = jnp.add(d, weights).reshape((-1, ))
     return jnp.where(delta_sum >= 0, 0., d)
 
 @jax.jit
-def apply_step_jit(kappa, rho0, pre_filtered, post_filtered, weights, delta):
+def apply_step_jit(kappa, rho0, pre_filtered, post_filtered, weights):
     step_vv = jax.vmap(partial(step_jit, kappa, rho0, pre_filtered))
-    return step_vv(post_filtered, weights, delta)
+    return step_vv(post_filtered, weights)
 
 
     
@@ -169,7 +169,7 @@ class SimISP(Operator):
             #    delta[i,:] = -kappa * pre_filtered * mask[i,:] * (post_filtered[i] - rho0)
             #    delta_sum = np.add(delta[i,:], weights[i,:])
             if jit:
-                delta[:, :] = apply_step_jit(kappa, rho0, pre_filtered, post_filtered, weights, delta) * mask
+                delta[:, :] = apply_step_jit(kappa, rho0, pre_filtered, post_filtered, weights) * mask
             else:
                 a = -kappa * (post_filtered - rho0)
                 np.multiply(self.mask, pre_filtered, out=delta)
