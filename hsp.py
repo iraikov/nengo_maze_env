@@ -1,14 +1,11 @@
-from functools import partial
 from nengo.exceptions import SimulationError, ValidationError, BuildError
-from nengo.neurons import LIF, LIFRate
 from nengo.builder import Builder, Operator, Signal
-from nengo.builder.neurons import SimNeurons
 from nengo.learning_rules import *
 from nengo.builder.learning_rules import *
 from nengo.params import (NumberParam, BoolParam)
 from nengo.builder.operator import DotInc, ElementwiseInc, Copy, Reset
 from nengo.connection import LearningRule
-from nengo.ensemble import Ensemble, Neurons
+from functools import partial
 import jax
 import jax.numpy as jnp
 
@@ -175,7 +172,7 @@ class SimHSP(Operator):
                     dw = apply_step_directed_jit(kappa, post_filtered, pre_filtered, weights)
                 else:
                     dw = apply_step_undirected_jit(kappa, post_filtered, pre_filtered, weights)
-                delta[:, :] = np.clip(dw * mask, 0., None)
+                delta[...] = np.clip(dw * mask, 0., None)
             else:
                 sgn[:,:] = 1
                 for i in range(weights.shape[0]):

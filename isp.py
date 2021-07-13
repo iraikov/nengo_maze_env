@@ -1,15 +1,11 @@
-from functools import partial
 from nengo.exceptions import SimulationError, ValidationError, BuildError
-from nengo.neurons import LIF, LIFRate
 from nengo.builder import Builder, Operator, Signal
-from nengo.builder.neurons import SimNeurons
 from nengo.learning_rules import *
 from nengo.builder.learning_rules import *
 from nengo.params import (NumberParam, BoolParam)
 from nengo.builder.operator import DotInc, ElementwiseInc, Copy, Reset
 from nengo.connection import LearningRule
-from nengo.ensemble import Ensemble, Neurons
-from numba import jit, prange
+from functools import partial
 import jax
 import jax.numpy as jnp
 
@@ -59,8 +55,8 @@ class ISP(LearningRuleType):
 @jax.jit
 def step_jit(kappa, rho0, pre_filtered, post_filtered, weights):
     d = -kappa * pre_filtered * (post_filtered - rho0)
-    delta_sum = jnp.add(d, weights).reshape((-1, ))
-    return jnp.where(delta_sum >= 0, 0., d)
+    delta_sum = jnp.add(d, weights)
+    return jnp.where(delta_sum >= 0, 0. - weights, d)
 
 @jax.jit
 def apply_step_jit(kappa, rho0, pre_filtered, post_filtered, weights):
@@ -169,7 +165,7 @@ class SimISP(Operator):
             #    delta[i,:] = -kappa * pre_filtered * mask[i,:] * (post_filtered[i] - rho0)
             #    delta_sum = np.add(delta[i,:], weights[i,:])
             if jit:
-                delta[:, :] = apply_step_jit(kappa, rho0, pre_filtered, post_filtered, weights) * mask
+                delta[...] = apply_step_jit(kappa, rho0, pre_filtered, post_filtered, weights) * mask
             else:
                 a = -kappa * (post_filtered - rho0)
                 np.multiply(self.mask, pre_filtered, out=delta)
