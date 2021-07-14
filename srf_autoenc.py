@@ -135,7 +135,7 @@ def build_network(params, inputs, coords=None, n_outputs=None, n_exc=None, n_inh
         weights_initial_PV_E = local_random.uniform(size=n_outputs*n_exc).reshape((n_exc, n_outputs)) * w_PV_E
         for i in range(n_exc):
             dist = cdist(decoder_coords[i,:].reshape((1,-1)), srf_network.output_coordinates).flatten()
-            sigma = 0.1
+            sigma = 0.05
             prob = distance_probs(dist, sigma)    
             sources = np.asarray(local_random.choice(n_outputs, round(p_PV * n_outputs), replace=False, p=prob), dtype=np.int32)
             weights_initial_PV_E[i, np.logical_not(np.in1d(range(n_outputs), sources))] = 0.
@@ -150,7 +150,7 @@ def build_network(params, inputs, coords=None, n_outputs=None, n_exc=None, n_inh
         weights_initial_PV_I = local_random.uniform(size=n_inh*n_outputs).reshape((n_inh, n_outputs)) * w_PV_I
         for i in range(n_inh_decoder):
             dist = cdist(decoder_inh_coords[i,:].reshape((1,-1)), srf_network.output_coordinates).flatten()
-            sigma = 0.1
+            sigma = 1.0
             prob = distance_probs(dist, sigma)    
             sources = np.asarray(local_random.choice(n_outputs, round(p_PV * n_outputs), replace=False, p=prob), dtype=np.int32)
             weights_initial_PV_I[i, np.logical_not(np.in1d(range(n_outputs), sources))] = 0.
@@ -160,7 +160,7 @@ def build_network(params, inputs, coords=None, n_outputs=None, n_exc=None, n_inh
                                      synapse=nengo.Alpha(params['tau_E']))
     
         w_decoder_I = params['w_initial_I']
-        weights_initial_decoder_I = local_random.uniform(size=n_inh*n_exc).reshape((n_exc, n_inh)) * w_decoder_I
+        weights_initial_decoder_I = local_random.uniform(size=n_inh_decoder*n_exc).reshape((n_exc, n_inh_decoder)) * w_decoder_I
 
         conn_decoder_I = nengo.Connection(decoder_inh.neurons,
                                           decoder.neurons,
@@ -171,9 +171,10 @@ def build_network(params, inputs, coords=None, n_outputs=None, n_exc=None, n_inh
         coincidence_detection = nengo.Node(size_in=2*n_inputs, size_out=n_inputs,
                                            output=lambda t,x: np.subtract(x[:n_inputs], x[n_inputs:]))
         nengo.Connection(coincidence_detection, conn_decoder_I.learning_rule)
-        nengo.Connection(srf_network.exc.neurons, coincidence_detection[:n_inputs])
-        nengo.Connection(decoder.neurons, coincidence_detection[n_inputs:])
+        nengo.Connection(srf_network.exc.neurons, coincidence_detection[n_inputs:])
+        nengo.Connection(decoder.neurons, coincidence_detection[:n_inputs])
 
+        # TODO: look into separate inh ensemble for decoder
         # w_initial_EI = params['w_initial_EI']
         # p_decoder_EI = 0.01
         # weights_decoder_EI = local_random.uniform(size=n_exc*n_inh_decoder).reshape((n_inh_decoder, n_exc)) * w_initial_EI

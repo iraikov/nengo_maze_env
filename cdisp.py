@@ -25,7 +25,7 @@ class CDISP(LearningRuleType):
     learning_rate = NumberParam("learning_rate", low=0, readonly=True, default=1e-6)
     pre_synapse = SynapseParam("pre_synapse", default=Lowpass(tau=0.02), readonly=True)
     post_synapse = SynapseParam("post_synapse", default=None, readonly=True)
-    sigma_synapse = SynapseParam("sigma_synapse", default=Lowpass(tau=0.02), readonly=True)
+    sigma_synapse = SynapseParam("sigma_synapse", default=Lowpass(tau=0.005), readonly=True)
 
     jit = BoolParam("jit", default=True, readonly=True)
 
