@@ -13,58 +13,8 @@ from nengo_extras.plot_spikes import (
 from nengo_extras.neurons import (
     rates_kernel, rates_isi )
 from prf_net import PRF
+from linear_trajectory import generate_linear_trajectory, generate_input_rates
 
-# In[2]:
-
-
-def generate_linear_trajectory(input_trajectory, temporal_resolution=1., velocity=30., equilibration_duration=None, n_trials=1):
-    """
-    Construct coordinate arrays for a spatial trajectory, considering run velocity to interpolate at the specified
-    temporal resolution. Optionally, the trajectory can be prepended with extra distance traveled for a specified
-    network equilibration time, with the intention that the user discards spikes generated during this period before
-    analysis.
-
-    :param trajectory: namedtuple
-    :param temporal_resolution: float (s)
-    :param equilibration_duration: float (s)
-    :return: tuple of array
-    """
-
-    trajectory_lst = []
-    for i_trial in range(n_trials):
-        trajectory_lst.append(input_trajectory)
-
-    trajectory = np.concatenate(trajectory_lst)
-        
-    velocity = velocity  # (cm / s)
-    spatial_resolution = velocity * temporal_resolution
-    x = trajectory[:, 0]
-    y = trajectory[:, 1]
-    
-    if equilibration_duration is not None:
-        equilibration_distance = velocity / equilibration_duration
-        x = np.insert(x, 0, x[0] - equilibration_distance)
-        y = np.insert(y, 0, y[0])
-    else:
-        equilibration_duration = 0.
-        equilibration_distance = 0.
-    
-    segment_lengths = np.sqrt((np.diff(x) ** 2. + np.diff(y) ** 2.))
-    distance = np.insert(np.cumsum(segment_lengths), 0, 0.)
-    
-    interp_distance = np.arange(distance.min(), distance.max() + spatial_resolution / 2., spatial_resolution)
-    interp_x = np.interp(interp_distance, distance, x)
-    interp_y = np.interp(interp_distance, distance, y)
-    t = interp_distance / velocity  # s
-    
-    t = np.subtract(t, equilibration_duration)
-    interp_distance -= equilibration_distance
-    
-    return t, interp_x, interp_y, interp_distance
-
-
-
-# In[3]:
 
 arena_margin = 0.25
 arena_dimension = 200
@@ -91,35 +41,10 @@ exc_module_field_width_dict = {i : exc_field_width( float(i) / float(nmodules_ex
 inh_module_field_width_dict = {i : inh_field_width( float(i) / float(nmodules_inh) ) for i in range(nmodules_inh)}
     
 
-def generate_input_rates(module_field_width_dict, basis_function='gaussian', spacing_factor=1.0, peak_rate=1.):
-    input_nodes_dict = {}
-    input_groups_dict = {}
-    input_rates_dict = {}
-    
-    for m in module_field_width_dict:
-        nodes, groups, _ = poisson_disc_nodes(module_field_width_dict[m], (vert, smp))
-        input_groups_dict[m] = groups
-        input_nodes_dict[m] = nodes
-        input_rates_dict[m] = {}
-        
-        for i in range(nodes.shape[0]):
-            xs = [[nodes[i,0], nodes[i,1]]]
-            x_obs = np.asarray(xs).reshape((1,-1))
-            u_obs = np.asarray([[peak_rate]]).reshape((1,-1))
-            if basis_function == 'constant':
-                input_rate_ip  = lambda xx, yy: xx, yy
-            else:
-                input_rate_ip  = Rbf(x_obs[:,0], x_obs[:,1], u_obs,
-                                    function=basis_function, 
-                                    epsilon=module_field_width_dict[m] * spacing_factor)
-            input_rates_dict[m][i] = input_rate_ip
-            
-    return input_nodes_dict, input_groups_dict, input_rates_dict
-
 exc_input_nodes_dict, exc_input_groups_dict, exc_input_rates_dict = \
-    generate_input_rates(exc_module_field_width_dict, spacing_factor=0.8, peak_rate=peak_rate)
+    generate_input_rates((vert,smp), exc_module_field_width_dict, spacing_factor=0.8, peak_rate=peak_rate)
 inh_input_nodes_dict, inh_input_groups_dict, inh_input_rates_dict = \
-    generate_input_rates(inh_module_field_width_dict, basis_function='inverse', spacing_factor=1.4, peak_rate=peak_rate)
+    generate_input_rates((vert,smp), inh_module_field_width_dict, basis_function='inverse', spacing_factor=1.4, peak_rate=peak_rate)
 
 def make_input_rate_matrix(input_rates_dict):
 
@@ -238,7 +163,7 @@ plt.colorbar()
 plt.show()
 
 print(f"t_max = {np.max(trj_t)}")    
-with nengo.Simulator(srf_network, optimize=True) as sim:
+with nengo.Simulator(srf_network, optimize=True, dt=0.01) as sim:
     sim.run(np.max(trj_t))
 
 
@@ -258,7 +183,7 @@ np.save("exc_weights", np.asarray(exc_weights, dtype=np.float32))
 np.save("rec_weights", np.asarray(rec_weights, dtype=np.float32))
 np.save("inh_weights", np.asarray(inh_weights, dtype=np.float32))
 
-sorted_idxs = np.argsort(-np.argmax(output_rates[39280:].T, axis=1))
+sorted_idxs = np.argsort(-np.argmax(output_rates[3928:].T, axis=1))
 plt.imshow(output_rates[:,sorted_idxs].T, aspect="auto", interpolation="nearest")
 plt.colorbar()
 plt.show()
