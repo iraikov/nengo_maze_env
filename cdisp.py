@@ -166,7 +166,7 @@ class SimCDISP(Operator):
                 delta[...] = apply_step_jit(kappa, mask, error_filtered, pre_filtered, post_filtered, weights)
             else:
                 for i in range(weights.shape[0]):
-                    d = -kappa * pre_filtered * self.mask * error_filtered[i]
+                    d = -kappa * pre_filtered * self.mask[i] * error_filtered[i]
                     delta_sum = np.add(weights[i], d)
                     delta[i,:] = np.where(delta_sum >= 0, 0. - weights[i], d)
             
