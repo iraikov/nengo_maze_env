@@ -35,7 +35,7 @@ class CDISP(LearningRuleType):
                  pre_synapse=Default,
                  post_synapse=Default,
                  jit=Default):
-        super().__init__(learning_rate, size_in="post")
+        super(CDISP, self).__init__(learning_rate, size_in="post")
         self.sigma_synapse = sigma_synapse
         self.pre_synapse = pre_synapse
         self.post_synapse = (
@@ -48,15 +48,15 @@ class CDISP(LearningRuleType):
         return _remove_default_post_synapse(super()._argreprs, self.pre_synapse)
 
 @jax.jit
-def step_jit(kappa, mask, error_filtered, pre_filtered, post_filtered, weights):
+def step_jit(kappa, post_filtered, pre_filtered, error_filtered, weights, mask):
     d = -kappa * mask * pre_filtered * error_filtered
-    delta_sum = jnp.add(d, weights).reshape((-1, ))
+    delta_sum = jnp.add(d, weights)
     return jnp.where(delta_sum >= 0, 0. - weights, d)
 
 @jax.jit
 def apply_step_jit(kappa, mask, error_filtered, pre_filtered, post_filtered, weights):
-    step_vv = jax.vmap(partial(step_jit, kappa, mask, pre_filtered, error_filtered))
-    return step_vv(post_filtered, weights)
+    step_vv = jax.vmap(partial(step_jit, kappa, post_filtered, pre_filtered))
+    return step_vv(error_filtered.reshape((-1,1)), weights, mask)
 
 
     
@@ -108,8 +108,8 @@ class SimCDISP(Operator):
     4. updates ``[delta]``
     """
 
-    def __init__(self, pre_filtered, post_filtered, weights, error_filtered, delta, learning_rate, jit, tag=None):
-        super().__init__(tag=tag)
+    def __init__(self, pre_filtered, post_filtered, error_filtered, weights, delta, learning_rate, jit, tag=None):
+        super(SimCDISP, self).__init__(tag=tag)
         self.learning_rate = learning_rate
         self.mask = np.logical_not(np.isclose(weights.initial_value, 0.))
         self.sets = []
@@ -165,13 +165,10 @@ class SimCDISP(Operator):
             if jit:
                 delta[...] = apply_step_jit(kappa, mask, error_filtered, pre_filtered, post_filtered, weights)
             else:
-                d = -kappa * pre_filtered * self.mask * error_filtered
-                print(f"cdisp: d = {d}")
-                print(f"cdisp: weights = {weights}")
-                delta_sum = np.add(weights, d)
-                print(f"cdisp: delta_sum = {delta_sum}")
-                delta[...] = np.where(delta_sum >= 0, 0. - weights, d)
-            print(f"cdisp: delta after = {delta}")
+                for i in range(weights.shape[0]):
+                    d = -kappa * pre_filtered * self.mask * error_filtered[i]
+                    delta_sum = np.add(weights[i], d)
+                    delta[i,:] = np.where(delta_sum >= 0, 0. - weights[i], d)
             
         return step_simcdisp
 
@@ -208,15 +205,14 @@ def build_cdisp(model, cdisp, rule):
                                           Signal(shape=rule.size_in, name="CDISP:error"))
     model.sig[rule]["in"] = error_filtered  # error connection will attach here
 
-    weights = model.sig[conn]["weights"]
                 
     model.add_op(
         SimCDISP(
             pre_filtered,
             post_filtered,
-            weights,
             error_filtered,
-            model.sig[rule]["delta"],
+            weights = model.sig[conn]["weights"],
+            delta = model.sig[rule]["delta"],
             learning_rate=cdisp.learning_rate,
             jit=cdisp.jit
         )

@@ -22,7 +22,7 @@ with nengo.Network(seed=seed) as net:
     initial_inh_weights = np.ones((N, N)) * -1e-3
     conn = nengo.Connection(
         c.neurons, b.neurons, transform=initial_inh_weights,
-        learning_rule_type=CDISP(learning_rate=1e-3, jit=False)
+        learning_rule_type=CDISP(learning_rate=1e-3, jit=True)
     )
     
     p_weights = nengo.Probe(conn, "weights")
