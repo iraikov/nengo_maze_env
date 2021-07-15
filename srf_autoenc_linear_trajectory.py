@@ -131,10 +131,10 @@ params = {'w_initial_E': 0.01,
           'learning_rate_I': 0.01, 
           'learning_rate_E': 0.04596530}
                 
-params = {'w_initial_E': 0.01, 
-          'w_initial_EI': 0.012681074, 
-          'w_initial_I': -0.028862255, 
-          'w_EI_Ext': 0.02956312, 
+params = {'w_initial_E': 0.1, 
+          'w_initial_EI': 1e-3,
+          'w_initial_I': -0.01, 
+          'w_EI_Ext': 1e-3,
           'w_PV_E': 0.005, 
           'w_PV_I': 0.002, 
           'p_E_srf': 0.2, 
@@ -145,8 +145,8 @@ params = {'w_initial_E': 0.01,
           'tau_E': 0.005, 
           'tau_I': 0.020, 
           'tau_input': 0.1,
-          'learning_rate_I': 0.01, 
-          'learning_rate_E': 0.04}
+          'learning_rate_I': 0.001, 
+          'learning_rate_E': 0.004}
 
 dt = 0.01
 model_dict = build_network(params, inputs=exc_trajectory_inputs,
