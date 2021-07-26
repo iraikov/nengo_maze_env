@@ -4,6 +4,7 @@ import scipy.ndimage
 from skimage.data import immunohistochemistry, binary_blobs
 from skimage.draw import circle
 from functools import partial
+import mazelab
 from mazelab.generators import random_shape_maze, morris_water_maze
 from aniso import anisodiff
 from enum import Enum
@@ -317,7 +318,6 @@ class NengoMazeEnvironment(object):
         # Keep the agent within the bounds of the maze
         self.x = np.clip(self.x, 1, self.width - 1)
         self.y = np.clip(self.y, 1, self.height - 1)
-        dth =
         if self.th > 2*np.pi:
             self.th -= 2*np.pi
         elif self.th < -2*np.pi:
@@ -344,6 +344,6 @@ class NengoMazeEnvironment(object):
 
         #print(self.sensor_textures)
         #return self.sensor_dists
-        return np.concatenate([[self.x], [self.y], [dx], [dy],
+        return np.concatenate([[self.x], [self.y], 
                                [(self.th / (2*np.pi)) + 1.],
                               self.sensor_dists, self.sensor_textures, self.reward])
