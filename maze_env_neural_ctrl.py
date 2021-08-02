@@ -44,7 +44,7 @@ with model:
             width=15,
             fov=125,
             normalize_sensor_output=True,
-            maze_shape=MazeShape.MAZE_HANLON
+            maze_shape=MazeShape.MAZE_U
         ),
         size_in=4,
         size_out=2*n_sensors + 4,

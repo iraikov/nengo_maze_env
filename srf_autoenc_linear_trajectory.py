@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
 import scipy.interpolate
-from scipy.interpolate import Rbf, Akima1DInterpolator
+from scipy.interpolate import Akima1DInterpolator
 import nengo
 from nengo_extras.plot_spikes import (
     cluster, merge, plot_spikes, preprocess_spikes, sample_by_variance, sample_by_activity)
@@ -66,7 +66,8 @@ inh_module_field_width_dict = {i : inh_field_width( float(i) / float(nmodules_in
 exc_input_nodes_dict, exc_input_groups_dict, exc_input_rates_dict = \
     generate_input_rates((vert,smp), exc_module_field_width_dict, spacing_factor=0.8, peak_rate=peak_rate)
 inh_input_nodes_dict, inh_input_groups_dict, inh_input_rates_dict = \
-    generate_input_rates((vert,smp), inh_module_field_width_dict, basis_function='inverse', spacing_factor=1.4, peak_rate=peak_rate)
+    generate_input_rates((vert,smp), inh_module_field_width_dict, basis_function='inverse',
+                         spacing_factor=1.8, peak_rate=peak_rate)
 
 
 diag_trajectory = np.asarray([[-100, -100], [100, 100]])
@@ -100,19 +101,6 @@ seed = 19
 n_outputs=50
 n_exc=len(exc_trajectory_inputs)
 n_inh=100
-
-#srf_exc_coords = np.column_stack([x.flat for x in np.meshgrid(np.linspace(0, 1, n_x), np.linspace(0, 1, n_y), indexing='ij')])
-#srf_inh_coords = np.column_stack([x.flat for x in np.meshgrid(np.linspace(0, 1, n_inh), np.linspace(0, 1, n_inh), indexing='ij')])
-#srf_output_coords = np.column_stack([x.flat for x in np.meshgrid(np.linspace(0, 1, n_outputs), np.linspace(0, 1, n_outputs), indexing='ij')])
-
-#decoder_coords = np.column_stack([x.flat for x in np.meshgrid(np.linspace(0, 1, n_x), np.linspace(0, 1, n_y), indexing='ij')])
-#decoder_inh_coords = np.column_stack([x.flat for x in np.meshgrid(np.linspace(0, 1, n_inh), np.linspace(0, 1, n_inh), indexing='ij')])
-
-#coords_dict = { 'srf_output': srf_output_coords,
-#                'srf_exc': srf_exc_coords,
-#                'srf_inh': srf_inh_coords,
-#                'decoder': decoder_coords,
-#                'decoder_inh': decoder_inh_coords }
                 
 params = {'w_initial_E': 0.01, 
           'w_initial_EI': 0.012681074, 

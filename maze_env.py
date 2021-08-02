@@ -5,7 +5,7 @@ from skimage.data import immunohistochemistry, binary_blobs
 from skimage.draw import circle
 from functools import partial
 import mazelab
-from mazelab.generators import random_shape_maze, morris_water_maze
+from mazelab.generators import random_shape_maze, morris_water_maze, u_maze
 from aniso import anisodiff
 from enum import Enum
 from collections import defaultdict
@@ -17,6 +17,7 @@ class MazeShape(Enum):
     MAZE_RANDOM = 1
     MAZE_MORRIS = 2
     MAZE_HANLON = 3
+    MAZE_U = 4
 
         
 def generate_sensor_readings(map_arr,
@@ -189,6 +190,10 @@ class NengoMazeEnvironment(object):
                         self.object_map[x][y] = self.texture_map[x, y]
                         break
             #print(self.object_map)
+        if self.maze_shape == MazeShape.MAZE_U:
+            
+            maze = u_maze(width=self.width, height=self.height,
+                          obstacle_width=4, obstacle_height=4)
 
         else:
             raise RuntimeError("NengoMazeEnvironment: unknown maze shape %s" % str(self.maze_shape))
