@@ -11,11 +11,12 @@ from nengo_extras.plot_spikes import (
     cluster, merge, plot_spikes, preprocess_spikes, sample_by_variance, sample_by_activity)
 from nengo_extras.neurons import (
     rates_kernel, rates_isi )
-from linear_trajectory import generate_linear_trajectory, generate_input_rates
+from random_trajectory import generate_random_trajectory, generate_input_rates
 from srf_autoenc import build_network, run
 
 
-def plot_input_rates(input_rates_dict):
+def plot_input_rates(input_rates_dict, path):
+    trj_x, trj_y = path
     for m in input_rates_dict:
         plt.figure()
         arena_map = np.zeros(arena_xx.shape)
@@ -23,7 +24,7 @@ def plot_input_rates(input_rates_dict):
             input_rates = input_rates_dict[m][i](arena_xx, arena_yy)
             arena_map += input_rates
         plt.pcolor(arena_xx, arena_yy, arena_map, cmap=cm.jet)
-        #plt.plot(trj_x, trj_y)
+        plt.plot(trj_x, trj_y)
         ax = plt.gca()
         ax.set_aspect('equal')
         plt.colorbar()
@@ -70,8 +71,7 @@ inh_input_nodes_dict, inh_input_groups_dict, inh_input_rates_dict = \
                          peak_rate=peak_rate)
 
 
-diag_trajectory = np.asarray([[-100, -100], [100, 100]])
-trj_t, trj_x, trj_y, trj_d = generate_linear_trajectory(diag_trajectory, temporal_resolution=0.001, n_trials=3)
+trj_t, trj_x, trj_y, trj_d = generate_random_trajectory((vert,smp), max_distance=10000, temporal_resolution=0.001, n_trials=3)
 t_end = np.max(trj_t)
     
 exc_trajectory_input_rates = { m: {} for m in exc_input_rates_dict }
@@ -109,8 +109,8 @@ for m in inh_input_rates_dict:
         input_rates_ip = Akima1DInterpolator(trj_t, input_rates)
         inh_trajectory_inputs.append(input_rates_ip)
    
-plot_input_rates(exc_input_rates_dict)
-plot_input_rates(inh_input_rates_dict)
+plot_input_rates(exc_input_rates_dict, (trj_x, trj_y))
+plot_input_rates(inh_input_rates_dict, (trj_x, trj_y))
 
 
 seed = 19

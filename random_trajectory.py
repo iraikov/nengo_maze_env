@@ -1,14 +1,21 @@
-
+import sys
+from collections import deque
 from functools import partial
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
 import scipy.interpolate
 from scipy.interpolate import Rbf, Akima1DInterpolator
+from scipy.spatial import Delaunay
 from rbf.pde.nodes import disperse, poisson_disc_nodes
+import networkx as nx
+
+def euclidean_distance(p, q):
+    d = p - q
+    return np.sqrt(np.dot(d, d))
 
 
-def generate_linear_trajectory(input_trajectory, temporal_resolution=1., velocity=30., equilibration_duration=None, n_trials=1):
+def generate_random_trajectory(arena, max_distance=None, spacing=10.0, temporal_resolution=1., velocity=30., equilibration_duration=None, local_random=None, n_trials=1):
     """
     Construct coordinate arrays for a spatial trajectory, considering run velocity to interpolate at the specified
     temporal resolution. Optionally, the trajectory can be prepended with extra distance traveled for a specified
@@ -21,6 +28,46 @@ def generate_linear_trajectory(input_trajectory, temporal_resolution=1., velocit
     :return: tuple of array
     """
 
+    if local_random is None:
+        local_random = np.random.RandomState(0)
+    
+    vert, smp = arena
+
+    # generate the nodes. `nodes` is a (N, 2) float array, `groups` is a dict
+    # identifying which group each node is in.
+    nodes, groups, _ = poisson_disc_nodes(spacing, (vert, smp))
+    N = nodes.shape[0]
+
+    tri = Delaunay(nodes)
+    G = nx.Graph()
+    for path in tri.simplices:
+        nx.add_path(G, path)
+    
+    # Choose a starting point
+    path_distance = 0.
+    path_nodes = []
+    p = None
+    s = local_random.choice(N)
+    visited = deque(maxlen=5)
+    while ((max_distance is None) or (path_distance < max_distance)):
+
+        neighbors = list(G.neighbors(s))
+        visited.append(s)
+        path_nodes.append(s)
+        if p is not None:
+            path_distance = path_distance + euclidean_distance(nodes[s], nodes[p])
+        p = s
+        print(path_distance)
+        
+        candidates = [ n for n in neighbors if n not in visited ]
+        if len(candidates) == 0:
+            break
+        else:
+            selected = local_random.choice(len(candidates))
+            s = candidates[selected]
+
+    input_trajectory = nodes[path_nodes]
+            
     trajectory_lst = []
     for i_trial in range(n_trials):
         trajectory_lst.append(input_trajectory)
@@ -64,7 +111,6 @@ def generate_input_rates(spatial_domain, module_field_width_dict, basis_function
         spacing_factors = [spacing_factor]*n_modules
     else:
         spacing_factors = spacing_factor
-    print(f"spacing factors: {spacing_factors}")
     vert, smp = spatial_domain
     for m in sorted(module_field_width_dict):
         nodes, groups, _ = poisson_disc_nodes(module_field_width_dict[m], (vert, smp))

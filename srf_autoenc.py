@@ -19,11 +19,17 @@ def distance_probs(dist, sigma):
     prob = weights / weights.sum(axis=0)                                                                                           
     return prob                                                                                                                    
 
-def array_input(input_matrix, dt, t, *args):
+def array_input(input_matrix, dt, t, oob_value=None):
     i = int(t/dt)
     if i >= input_matrix.shape[-1]:
         i = -1
-    return input_matrix[i].ravel()
+    if i == -1:
+        if oob_value is None:
+            return input_matrix[i].ravel()
+        else:
+            return np.ones(input_matrix[i].shape)*oob_value
+    else:
+        return input_matrix[i].ravel()
 
 
 def callable_input(inputs, t, centered=False):
@@ -34,7 +40,7 @@ def callable_input(inputs, t, centered=False):
     return result
 
 
-def build_network(params, inputs, coords=None, n_outputs=None, n_exc=None, n_inh=None, n_inh_decoder=None, seed=0, dt=None):
+def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n_exc=None, n_inh=None, n_inh_decoder=None, seed=0, dt=None):
     
     local_random = np.random.RandomState(seed)
 
@@ -82,7 +88,7 @@ def build_network(params, inputs, coords=None, n_outputs=None, n_exc=None, n_inh
     if type(inputs) == np.ndarray:
         if dt is None:
             raise RuntimeError("dt is not provided when array input is provided")
-        exc_input_func = partial(array_input, inputs, dt)
+        exc_input_func = partial(array_input, inputs, dt, oob_value=oob_value)
     else:
         exc_input_func = partial(callable_input, inputs)
         
@@ -130,34 +136,34 @@ def build_network(params, inputs, coords=None, n_outputs=None, n_exc=None, n_inh
                                       intercepts=nengo.dists.Choice([0.1]),                                                 
                                       max_rates=nengo.dists.Choice([100]))
 
-        w_PV_E = params['w_PV_E']
-        p_PV = params['p_PV']
-        weights_initial_PV_E = local_random.uniform(size=n_outputs*n_exc).reshape((n_exc, n_outputs)) * w_PV_E
+        w_DEC_E = params['w_DEC_E']
+        p_DEC = params['p_DEC']
+        weights_initial_DEC_E = local_random.uniform(size=n_outputs*n_exc).reshape((n_exc, n_outputs)) * w_DEC_E
         for i in range(n_exc):
             dist = cdist(decoder_coords[i,:].reshape((1,-1)), srf_network.output_coordinates).flatten()
             sigma = 0.05
             prob = distance_probs(dist, sigma)    
-            sources = np.asarray(local_random.choice(n_outputs, round(p_PV * n_outputs), replace=False, p=prob), dtype=np.int32)
-            weights_initial_PV_E[i, np.logical_not(np.in1d(range(n_outputs), sources))] = 0.
+            sources = np.asarray(local_random.choice(n_outputs, round(p_DEC * n_outputs), replace=False, p=prob), dtype=np.int32)
+            weights_initial_DEC_E[i, np.logical_not(np.in1d(range(n_outputs), sources))] = 0.
 
-        conn_PV_E = nengo.Connection(srf_network.output.neurons,
-                                     decoder.neurons,
-                                     transform=weights_initial_PV_E,
-                                     learning_rule_type=HSP(learning_rate=params['learning_rate_E']),
-                                     synapse=nengo.Alpha(params['tau_E']))
+        conn_DEC_E = nengo.Connection(srf_network.output.neurons,
+                                      decoder.neurons,
+                                      transform=weights_initial_DEC_E,
+                                      #learning_rule_type=HSP(learning_rate=params['learning_rate_E']),
+                                      synapse=nengo.Alpha(params['tau_E']))
 
-        w_PV_I = params['w_PV_I']
-        weights_initial_PV_I = local_random.uniform(size=n_inh*n_outputs).reshape((n_inh, n_outputs)) * w_PV_I
+        w_DEC_I = params['w_DEC_I']
+        weights_initial_DEC_I = local_random.uniform(size=n_inh*n_outputs).reshape((n_inh, n_outputs)) * w_DEC_I
         for i in range(n_inh_decoder):
             dist = cdist(decoder_inh_coords[i,:].reshape((1,-1)), srf_network.output_coordinates).flatten()
             sigma = 1.0
             prob = distance_probs(dist, sigma)    
-            sources = np.asarray(local_random.choice(n_outputs, round(p_PV * n_outputs), replace=False, p=prob), dtype=np.int32)
-            weights_initial_PV_I[i, np.logical_not(np.in1d(range(n_outputs), sources))] = 0.
-        conn_PV_I = nengo.Connection(srf_network.output.neurons,
-                                     decoder_inh.neurons,
-                                     transform=weights_initial_PV_I,
-                                     synapse=nengo.Alpha(params['tau_E']))
+            sources = np.asarray(local_random.choice(n_outputs, round(p_DEC * n_outputs), replace=False, p=prob), dtype=np.int32)
+            weights_initial_DEC_I[i, np.logical_not(np.in1d(range(n_outputs), sources))] = 0.
+        conn_DEC_I = nengo.Connection(srf_network.output.neurons,
+                                      decoder_inh.neurons,
+                                      transform=weights_initial_DEC_I,
+                                      synapse=nengo.Alpha(params['tau_E']))
     
         w_decoder_I = params['w_initial_I']
         weights_initial_decoder_I = local_random.uniform(size=n_inh_decoder*n_exc).reshape((n_exc, n_inh_decoder)) * w_decoder_I
@@ -166,7 +172,7 @@ def build_network(params, inputs, coords=None, n_outputs=None, n_exc=None, n_inh
                                           decoder.neurons,
                                           transform=weights_initial_decoder_I,
                                           synapse=nengo.Alpha(params['tau_I']),
-                                          learning_rule_type=CDISP(learning_rate=0.025))
+                                          learning_rule_type=CDISP(learning_rate=0.01))
     
         coincidence_detection = nengo.Node(size_in=2*n_inputs, size_out=n_inputs,
                                            output=lambda t,x: np.subtract(x[:n_inputs], x[n_inputs:]))
@@ -207,6 +213,10 @@ def build_network(params, inputs, coords=None, n_outputs=None, n_exc=None, n_inh
         p_decoder_spikes = nengo.Probe(decoder.neurons, synapse=None)
         p_decoder_inh_rates = nengo.Probe(decoder_inh.neurons, synapse=None)
 
+        model.srf_network = srf_network
+        model.decoder_network = decoder
+        model.decoder_inh_network = decoder_inh
+        
     return { 'network': autoencoder_network,
              'neuron_probes': {'srf_output_spikes': p_srf_output_spikes,
                                'srf_exc_rates': p_srf_exc_rates,
