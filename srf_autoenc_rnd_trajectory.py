@@ -71,7 +71,7 @@ inh_input_nodes_dict, inh_input_groups_dict, inh_input_rates_dict = \
                          peak_rate=peak_rate)
 
 
-trj_t, trj_x, trj_y, trj_d = generate_random_trajectory((vert,smp), max_distance=10000, temporal_resolution=0.001, n_trials=3)
+trj_t, trj_x, trj_y, trj_d = generate_random_trajectory((vert,smp), spacing=15.0, max_distance=10000, temporal_resolution=0.001, n_trials=3)
 t_end = np.max(trj_t)
     
 exc_trajectory_input_rates = { m: {} for m in exc_input_rates_dict }
