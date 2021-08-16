@@ -50,10 +50,10 @@ arena_y = np.arange(-arena_extent, arena_extent, arena_res)
 
 arena_xx, arena_yy = np.meshgrid(arena_x, arena_y, indexing='ij')
 peak_rate = 1.
-nmodules_exc = 4
-nmodules_inh = 2
+nmodules_exc = 3
+nmodules_inh = 1
 
-exc_field_width_params = [35.0, 0.32]
+exc_field_width_params = [35.0, 0.8]
 exc_field_width  = lambda x: 40. + exc_field_width_params[0] * (np.exp(x / exc_field_width_params[1]) - 1.)
 inh_field_width_params = [60.0]
 inh_field_width  = lambda x: 100. + (inh_field_width_params[0] * x)
@@ -64,10 +64,11 @@ inh_module_field_width_dict = {i : inh_field_width( float(i) / float(nmodules_in
 
 exc_input_nodes_dict, exc_input_groups_dict, exc_input_rates_dict = \
     generate_input_rates((vert,smp), exc_module_field_width_dict,
-                         spacing_factor=0.8, peak_rate=peak_rate)
+                         spacing_factor=[ 0.015*exc_field_width( (float(i) / float(nmodules_exc)) ) for i in range(nmodules_exc) ],
+                         peak_rate=peak_rate)
 inh_input_nodes_dict, inh_input_groups_dict, inh_input_rates_dict = \
     generate_input_rates((vert,smp), inh_module_field_width_dict, basis_function='inverse',
-                         spacing_factor=[ 0.002*exc_field_width( 1.0 - (float(i) / float(nmodules_exc)) ) for i in range(nmodules_exc) ],
+                         spacing_factor=1.4,
                          peak_rate=peak_rate)
 
 

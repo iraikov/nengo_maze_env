@@ -15,6 +15,32 @@ from linear_trajectory import generate_linear_trajectory, generate_input_rates
 from srf_autoenc import build_network, run
 
 
+def modulation_depth(rates):
+    mod_depths = []
+    for i in range(rates.shape[1]):
+        rates_i = rates[:, i]
+        peak_pctile = np.percentile(rates_i, 80)
+        med_pctile = np.percentile(rates_i, 50)
+        peak_idxs = np.argwhere(rates_i >= peak_pctile)
+        med_idxs = np.argwhere(rates_i <= med_pctile)
+        mean_peak = np.mean(rates_i[peak_idxs])
+        mean_med = np.mean(rates_i[med_idxs])
+        mod_depth = (mean_peak - mean_med) ** 2.
+        mod_depths.append(mod_depth)
+        #logger.info(f"modulation_depth {i}: peak_pctile: {peak_pctile} med_pctile: {med_pctile} mod_depth: {mod_depth}")
+    return mod_depths
+
+
+def fraction_active(rates):
+    n = rates.shape[1]
+    bin_fraction_active = []
+    for i in range(rates.shape[0]):
+        rates_i = rates[i, :]
+        a = len(np.argwhere(rates_i >= 1.0))
+        bin_fraction_active.append(float(a) / float(n))
+        #logger.info(f"fraction_active {i}: a: {a} n: {n} fraction: {float(a) / float(n)}")
+    return bin_fraction_active
+
 def plot_input_rates(input_rates_dict):
     for m in input_rates_dict:
         plt.figure()
@@ -49,25 +75,26 @@ arena_y = np.arange(-arena_extent, arena_extent, arena_res)
 
 arena_xx, arena_yy = np.meshgrid(arena_x, arena_y, indexing='ij')
 peak_rate = 1.
-nmodules_exc = 4
-nmodules_inh = 2
+nmodules_exc = 3
+nmodules_inh = 1
 
-exc_field_width_params = [35.0, 0.32]
+exc_field_width_params = [35.0, 0.8]
 exc_field_width  = lambda x: 40. + exc_field_width_params[0] * (np.exp(x / exc_field_width_params[1]) - 1.)
 inh_field_width_params = [60.0]
 inh_field_width  = lambda x: 100. + (inh_field_width_params[0] * x)
 
 exc_module_field_width_dict = {i : exc_field_width( float(i) / float(nmodules_exc) ) for i in range(nmodules_exc)}
 inh_module_field_width_dict = {i : inh_field_width( float(i) / float(nmodules_inh) ) for i in range(nmodules_inh)}
-    
 
+print(f"exc_module_field_width_dict: {exc_module_field_width_dict}")
+    
 exc_input_nodes_dict, exc_input_groups_dict, exc_input_rates_dict = \
     generate_input_rates((vert,smp), exc_module_field_width_dict,
-                         spacing_factor=0.8, peak_rate=peak_rate)
+                         spacing_factor=[ 0.02*exc_field_width( (float(i) / float(nmodules_exc)) ) for i in range(nmodules_exc) ],
+                         peak_rate=peak_rate)
 inh_input_nodes_dict, inh_input_groups_dict, inh_input_rates_dict = \
     generate_input_rates((vert,smp), inh_module_field_width_dict, basis_function='inverse',
-                         spacing_factor=[ 0.002*exc_field_width( 1.0 - (float(i) / float(nmodules_exc)) ) for i in range(nmodules_exc) ],
-                         peak_rate=peak_rate)
+                         spacing_factor=1.4, peak_rate=peak_rate)
 
 
 diag_trajectory = np.asarray([[-100, -100], [100, 100]])
@@ -159,3 +186,14 @@ model_dict = build_network(params, inputs=exc_trajectory_inputs,
                            coords=None, seed=seed)
 print(f"t_end = {t_end}")
 results = run(model_dict, t_end, dt=dt, save_results=True)
+srf_autoenc_output_rates = results['srf_autoenc_output_rates']
+srf_autoenc_decoder_rates = results['srf_autoenc_decoder_rates']
+srf_autoenc_exc_rates = results['srf_autoenc_exc_rates']
+
+
+print(f"output modulation depth: {np.mean(modulation_depth(srf_autoenc_output_rates))}")
+print(f"decoder modulation depth: {np.mean(modulation_depth(srf_autoenc_decoder_rates))}")
+
+print(f"input fraction active: {np.mean(fraction_active(srf_autoenc_exc_rates))}")
+print(f"output fraction active: {np.mean(fraction_active(srf_autoenc_output_rates))}")
+print(f"decoder fraction active: {np.mean(fraction_active(srf_autoenc_decoder_rates))}")

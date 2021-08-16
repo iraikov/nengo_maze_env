@@ -3,7 +3,7 @@ import numpy as np
 import nengo
 from hsp import HSP
 from isp import ISP
-from gdhl import GDHL
+#from gdhl import GDHL
 import nengo_extras
 import nengo_extras.neurons
 import scipy

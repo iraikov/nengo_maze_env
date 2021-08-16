@@ -40,6 +40,7 @@ inh_field_width  = lambda x: 100. + (inh_field_width_params[0] * x)
 exc_module_field_width_dict = {i : exc_field_width( float(i) / float(nmodules_exc) ) for i in range(nmodules_exc)}
 inh_module_field_width_dict = {i : inh_field_width( float(i) / float(nmodules_inh) ) for i in range(nmodules_inh)}
     
+print(f"exc_module_field_width_dict: {exc_module_field_width_dict}")
 
 exc_input_nodes_dict, exc_input_groups_dict, exc_input_rates_dict = \
     generate_input_rates((vert,smp), exc_module_field_width_dict, spacing_factor=0.8, peak_rate=peak_rate)

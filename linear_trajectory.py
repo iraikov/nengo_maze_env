@@ -67,7 +67,9 @@ def generate_input_rates(spatial_domain, module_field_width_dict, basis_function
     print(f"spacing factors: {spacing_factors}")
     vert, smp = spatial_domain
     for m in sorted(module_field_width_dict):
+        
         nodes, groups, _ = poisson_disc_nodes(module_field_width_dict[m], (vert, smp))
+        print(f"Generated {nodes.shape[0]} nodes for field width {module_field_width_dict[m]}")
         input_groups_dict[m] = groups
         input_nodes_dict[m] = nodes
         input_rates_dict[m] = {}
