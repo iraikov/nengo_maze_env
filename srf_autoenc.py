@@ -127,11 +127,11 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
         decoder = nengo.Ensemble(n_exc, dimensions=1,
                                  neuron_type = nengo.LIF(),
                                  radius = 1,
-                                 intercepts=nengo.dists.Choice([0.1]),                                                 
+                                 intercepts=nengo.dists.Choice([0.1]),
                                  max_rates=nengo.dists.Choice([40]))
 
         decoder_inh =  nengo.Ensemble(n_inh_decoder, dimensions=1,
-                                      neuron_type = nengo.RectifiedLinear(),
+                                      neuron_type = nengo.LIF(),
                                       radius = 1,
                                       intercepts=nengo.dists.Choice([0.1]),                                                 
                                       max_rates=nengo.dists.Choice([100]))
@@ -172,7 +172,7 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
                                           decoder.neurons,
                                           transform=weights_initial_decoder_I,
                                           synapse=nengo.Alpha(params['tau_I']),
-                                          learning_rule_type=CDISP(learning_rate=0.01))
+                                          learning_rule_type=CDISP(learning_rate=params['learning_rate_D']))
     
         coincidence_detection = nengo.Node(size_in=2*n_inputs, size_out=n_inputs,
                                            output=lambda t,x: np.subtract(x[:n_inputs], x[n_inputs:]))
@@ -180,24 +180,23 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
         nengo.Connection(srf_network.exc.neurons, coincidence_detection[n_inputs:])
         nengo.Connection(decoder.neurons, coincidence_detection[:n_inputs])
 
-        # TODO: look into separate inh ensemble for decoder
-        # w_initial_EI = params['w_initial_EI']
-        # p_decoder_EI = 0.01
-        # weights_decoder_EI = local_random.uniform(size=n_exc*n_inh_decoder).reshape((n_inh_decoder, n_exc)) * w_initial_EI
-        # for i in range(n_inh_decoder):
-        #     dist = cdist(decoder_inh_coords[i,:].reshape((1,-1)), decoder_coords).flatten()
-        #     sigma = 0.1 * p_decoder_EI * n_exc
-        #     prob = distance_probs(dist, sigma)
-        #     sources = np.asarray(local_random.choice(n_exc, round(p_decoder_EI * n_exc), replace=False, p=prob),
-        #                          dtype=np.int32)
-        #     weights_decoder_EI[i, np.logical_not(np.in1d(range(n_exc), sources))] = 0.
+        # TODO: look into decoder inh ensemble backprojection to SRF output
+        w_initial_EI = params['w_initial_EI']
+        p_decoder_EI = params.get('p_decoder_EI', None)
+        if p_decoder_EI is not None:
+            weights_decoder_EI = local_random.uniform(size=n_exc*n_inh_decoder).reshape((n_inh_decoder, n_exc)) * w_initial_EI
+            for i in range(n_inh_decoder):
+                dist = cdist(decoder_inh_coords[i,:].reshape((1,-1)), decoder_coords).flatten()
+                sigma = 0.1 * p_decoder_EI * n_exc
+                prob = distance_probs(dist, sigma)
+                sources = np.asarray(local_random.choice(n_exc, round(p_decoder_EI * n_exc), replace=False, p=prob),
+                                     dtype=np.int32)
+                weights_decoder_EI[i, np.logical_not(np.in1d(range(n_exc), sources))] = 0.
 
-        # conn_decoder_EI = nengo.Connection(decoder.neurons,
-        #                                    decoder_inh.neurons,
-        #                                    transform=weights_decoder_EI,
-        #                                    synapse=nengo.Alpha(params['tau_E']))
-
-
+            conn_decoder_EI = nengo.Connection(decoder.neurons,
+                                               decoder_inh.neurons,
+                                               transform=weights_decoder_EI,
+                                               synapse=nengo.Alpha(params['tau_E']))
 
 
         p_srf_rec_weights = None
@@ -214,8 +213,8 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
         p_decoder_inh_rates = nengo.Probe(decoder_inh.neurons, synapse=None)
 
         model.srf_network = srf_network
-        model.decoder_network = decoder
-        model.decoder_inh_network = decoder_inh
+        model.decoder_ens = decoder
+        model.decoder_inh_ens = decoder_inh
         
     return { 'network': autoencoder_network,
              'neuron_probes': {'srf_output_spikes': p_srf_output_spikes,

@@ -98,7 +98,7 @@ inh_input_nodes_dict, inh_input_groups_dict, inh_input_rates_dict = \
 
 
 diag_trajectory = np.asarray([[-100, -100], [100, 100]])
-trj_t, trj_x, trj_y, trj_d = generate_linear_trajectory(diag_trajectory, temporal_resolution=0.001, n_trials=3)
+trj_t, trj_x, trj_y, trj_d = generate_linear_trajectory(diag_trajectory, temporal_resolution=0.001, n_trials=2)
 t_end = np.max(trj_t)
     
 exc_trajectory_input_rates = { m: {} for m in exc_input_rates_dict }
@@ -174,11 +174,13 @@ params = {'w_initial_E': 0.1,
           'p_EI': 0.1,
           'p_EI_Ext': 0.007, 
           'p_DEC': 0.2, 
+          'p_decoder_EI': 0.1, 
           'tau_E': 0.005, 
           'tau_I': 0.020, 
           'tau_input': 0.1,
           'learning_rate_I': 0.001, 
-          'learning_rate_E': 0.004}
+          'learning_rate_E': 0.004,
+          'learning_rate_D': 0.01}
 
 dt = 0.01
 model_dict = build_network(params, inputs=exc_trajectory_inputs, 

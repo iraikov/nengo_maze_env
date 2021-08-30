@@ -152,7 +152,9 @@ params = {'w_initial_E': 0.1,
           'tau_I': 0.020, 
           'tau_input': 0.1,
           'learning_rate_I': 0.001, 
-          'learning_rate_E': 0.004}
+          'learning_rate_E': 0.004,
+          'learning_rate_D': 0.01}
+
 
 dt = 0.01
 model_dict = build_network(params, inputs=exc_trajectory_inputs, 
