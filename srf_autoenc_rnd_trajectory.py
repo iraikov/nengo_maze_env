@@ -162,3 +162,19 @@ model_dict = build_network(params, inputs=exc_trajectory_inputs,
                            coords=None, seed=seed)
 print(f"t_end = {t_end}")
 results = run(model_dict, t_end, dt=dt, save_results=True)
+
+srf_autoenc_output_rates = results['srf_autoenc_output_rates']
+srf_autoenc_decoder_rates = results['srf_autoenc_decoder_rates']
+srf_autoenc_exc_rates = results['srf_autoenc_exc_rates']
+
+print(f"output modulation depth: {np.mean(modulation_depth(srf_autoenc_output_rates))}")
+print(f"decoder modulation depth: {np.mean(modulation_depth(srf_autoenc_decoder_rates))}")
+
+print(f"input fraction active: {np.mean(fraction_active(srf_autoenc_exc_rates))}")
+print(f"output fraction active: {np.mean(fraction_active(srf_autoenc_output_rates))}")
+print(f"decoder fraction active: {np.mean(fraction_active(srf_autoenc_decoder_rates))}")
+
+
+plt.imshow(srf_autoenc_output_rates.T, aspect="auto", interpolation="nearest")
+plt.colorbar()
+plt.show()

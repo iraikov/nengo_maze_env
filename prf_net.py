@@ -141,7 +141,6 @@ class PRF(nengo.Network):
                 targets_Out = np.asarray(rng.choice(target_choices, round(p_EE * n_outputs), replace=False, p=prob),
                                         dtype=np.int32)
                 weights_initial_EE[i, np.logical_not(np.in1d(range(n_outputs), targets_Out))] = 0.
-            print(np.min(weights_initial_EE))
 
         with self:
 
@@ -257,10 +256,10 @@ class PRF(nengo.Network):
         cfg = nengo.Config(nengo.Ensemble, nengo.Connection)
         cfg[nengo.Ensemble].update(
             {
-            "neuron_type": nengo.RectifiedLinear(),
-            "radius": 1,
-            "intercepts": nengo.dists.Choice([0.1]*self.dimensions),
-            "max_rates": nengo.dists.Choice([20])
+                "neuron_type": nengo.SpikingRectifiedLinear(),
+                "radius": 1,
+                "intercepts": nengo.dists.Choice([0.1]*self.dimensions),
+                "max_rates": nengo.dists.Choice([20])
             }
             )
         cfg[nengo.Connection].synapse = None
@@ -272,10 +271,10 @@ class PRF(nengo.Network):
         cfg = nengo.Config(nengo.Ensemble, nengo.Connection)
         cfg[nengo.Ensemble].update(
             {
-            "neuron_type": nengo.RectifiedLinear(),
-            "radius": 1,
-            "intercepts": nengo.dists.Choice([0.1]*self.dimensions),
-            "max_rates": nengo.dists.Choice([40])
+                "neuron_type": nengo.SpikingRectifiedLinear(),
+                "radius": 1,
+                "intercepts": nengo.dists.Choice([0.1]*self.dimensions),
+                "max_rates": nengo.dists.Choice([40])
             }
             )
         cfg[nengo.Connection].synapse = None
@@ -287,10 +286,10 @@ class PRF(nengo.Network):
         cfg = nengo.Config(nengo.Ensemble, nengo.Connection)
         cfg[nengo.Ensemble].update(
             {
-            "neuron_type": nengo.LIF(),
-            "radius": 1,
-            "intercepts": nengo.dists.Choice([0.1]*self.dimensions),
-            "max_rates": nengo.dists.Choice([40])
+                "neuron_type": nengo.LIF(),
+                "radius": 1,
+                "intercepts": nengo.dists.Choice([0.1]*self.dimensions),
+                "max_rates": nengo.dists.Choice([40])
             }
             )
         cfg[nengo.Connection].synapse = None

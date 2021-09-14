@@ -1,5 +1,5 @@
 
-
+import random
 from functools import partial
 import numpy as np
 import matplotlib.pyplot as plt
@@ -15,6 +15,19 @@ from linear_trajectory import generate_linear_trajectory, generate_input_rates
 from srf_autoenc import build_network, run
 
 
+def mse(rates, target_rates):
+    mses = []
+    for i in range(rates.shape[1]):
+        rates_i = rates[:, i]
+        target_rates_i = target_rates[:, i]
+        mean_error = np.mean(rates_i - target_rates_i)
+        mse = mean_error ** 2.
+        mses.append(mse)
+        #logger.info(f"modulation_depth {i}: peak_pctile: {peak_pctile} med_pctile: {med_pctile} mod_depth: {mod_depth}")
+    return mses
+    
+
+    
 def modulation_depth(rates):
     mod_depths = []
     for i in range(rates.shape[1]):
@@ -83,7 +96,7 @@ exc_field_width  = lambda x: 40. + exc_field_width_params[0] * (np.exp(x / exc_f
 inh_field_width_params = [60.0]
 inh_field_width  = lambda x: 100. + (inh_field_width_params[0] * x)
 
-exc_module_field_width_dict = {i : exc_field_width( float(i) / float(nmodules_exc) ) for i in range(nmodules_exc)}
+exc_module_field_width_dict = {i : exc_field_width( float(i) / float(nmodules_exc+2) ) for i in range(nmodules_exc)}
 inh_module_field_width_dict = {i : inh_field_width( float(i) / float(nmodules_inh) ) for i in range(nmodules_inh)}
 
 print(f"exc_module_field_width_dict: {exc_module_field_width_dict}")
@@ -135,7 +148,8 @@ for m in inh_input_rates_dict:
         inh_trajectory_input_rates[m][i] = input_rates
         input_rates_ip = Akima1DInterpolator(trj_t, input_rates)
         inh_trajectory_inputs.append(input_rates_ip)
-   
+
+        
 plot_input_rates(exc_input_rates_dict)
 plot_input_rates(inh_input_rates_dict)
 
@@ -145,7 +159,9 @@ seed = 19
 n_outputs=50
 n_exc=len(exc_trajectory_inputs)
 n_inh=100
-                
+
+t_learn = 28.284
+
 params = {'w_initial_E': 0.01, 
           'w_initial_EI': 0.012681074, 
           'w_initial_I': -0.028862255, 
@@ -169,29 +185,28 @@ params = {'w_initial_E': 0.1,
           'w_EI_Ext': 1e-3,
           'w_DEC_E': 0.005, 
           'w_DEC_I': 0.002, 
-          'p_E_srf': 0.2, 
+          'p_E_srf': 0.1, 
           'p_EE': 0.01, 
           'p_EI': 0.1,
-          'p_EI_Ext': 0.007, 
-          'p_DEC': 0.2, 
-          'p_decoder_EI': 0.1, 
+          'p_EI_Ext': 0.007,
+          'p_DEC': 0.1, 
           'tau_E': 0.005, 
           'tau_I': 0.020, 
           'tau_input': 0.1,
-          'learning_rate_I': 0.001, 
-          'learning_rate_E': 0.004,
-          'learning_rate_D': 0.01}
+          'learning_rate_I': 0.01, 
+          'learning_rate_E': 0.04,
+          'learning_rate_D': 0.001}
 
 dt = 0.01
 model_dict = build_network(params, inputs=exc_trajectory_inputs, 
                            n_outputs=n_outputs, n_exc=n_exc, n_inh=n_inh, n_inh_decoder=n_inh,
-                           coords=None, seed=seed)
+                           coords=None, seed=seed, t_learn=t_learn)
 print(f"t_end = {t_end}")
 results = run(model_dict, t_end, dt=dt, save_results=True)
 srf_autoenc_output_rates = results['srf_autoenc_output_rates']
 srf_autoenc_decoder_rates = results['srf_autoenc_decoder_rates']
+srf_autoenc_decoder_inh_rates = results['srf_autoenc_decoder_inh_rates']
 srf_autoenc_exc_rates = results['srf_autoenc_exc_rates']
-
 
 print(f"output modulation depth: {np.mean(modulation_depth(srf_autoenc_output_rates))}")
 print(f"decoder modulation depth: {np.mean(modulation_depth(srf_autoenc_decoder_rates))}")
@@ -199,3 +214,9 @@ print(f"decoder modulation depth: {np.mean(modulation_depth(srf_autoenc_decoder_
 print(f"input fraction active: {np.mean(fraction_active(srf_autoenc_exc_rates))}")
 print(f"output fraction active: {np.mean(fraction_active(srf_autoenc_output_rates))}")
 print(f"decoder fraction active: {np.mean(fraction_active(srf_autoenc_decoder_rates))}")
+print(f"decoder mse: {np.mean(mse(srf_autoenc_decoder_rates, srf_autoenc_exc_rates))}")
+
+
+plt.imshow(srf_autoenc_output_rates.T, aspect="auto", interpolation="nearest")
+plt.colorbar()
+plt.show()
