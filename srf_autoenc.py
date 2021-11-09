@@ -144,15 +144,15 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
         tau_E = params['tau_E']
         w_RCL = params['w_RCL']
         p_RCL = params['p_RCL']
-        weights_initial_RCL = local_random.uniform(size=n_recall*n_exc).reshape((n_exc, n_recall)) * w_RCL
+        weights_initial_RCL = local_random.uniform(size=n_recall*n_outputs).reshape((n_outputs, n_recall)) * w_RCL
         for i in range(n_recall):
-            target_choices = np.asarray(range(n_exc))
+            target_choices = np.asarray(range(n_outputs))
             dist = cdist(recall_coords[i,:].reshape((1,-1)), srf_exc_coords[target_choices]).flatten()
-            sigma = 0.1 * p_RCL * n_exc
+            sigma = 0.1 * p_RCL * n_outputs
             prob = distance_probs(dist, sigma)
-            targets_Out = np.asarray(local_random.choice(target_choices, round(p_RCL * n_exc), replace=False, p=prob),
+            targets_Out = np.asarray(local_random.choice(target_choices, round(p_RCL * n_outputs), replace=False, p=prob),
                                      dtype=np.int32)
-            weights_initial_RCL[np.logical_not(np.in1d(range(n_exc), targets_Out)), i] = 0.
+            weights_initial_RCL[np.logical_not(np.in1d(range(n_outputs), targets_Out)), i] = 0.
 
 
         model.conn_RCL = nengo.Connection(model.recall.neurons,

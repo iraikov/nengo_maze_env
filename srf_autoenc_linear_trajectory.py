@@ -205,11 +205,11 @@ dt = 0.01
 model_dict = build_network(params, inputs=exc_trajectory_inputs, oob_value=0.,
                            n_outputs=n_outputs, n_exc=n_exc, n_inh=n_inh, n_inh_decoder=n_inh, n_recall=2,
                            coords=None, seed=seed, t_learn=t_learn)
-t_end = 32.
+t_end = 35.
 
 network = model_dict['network']
 with network as model:
-    recall_input = nengo.Node(lambda t: 1 if t > 30 and t < 31 else 0)
+    recall_input = nengo.Node(lambda t: 1 if t > 30 and t < 34 else 0)
     recall_conn = nengo.Connection(recall_input, network.recall.neurons[0])
     p_recall_input = nengo.Probe(recall_input)
     
