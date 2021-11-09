@@ -112,8 +112,9 @@ inh_input_nodes_dict, inh_input_groups_dict, inh_input_rates_dict = \
 
 diag_trajectory = np.asarray([[-100, -100], [100, 100]])
 trj_t, trj_x, trj_y, trj_d = generate_linear_trajectory(diag_trajectory, temporal_resolution=0.001, n_trials=2)
-t_end = np.max(trj_t)
     
+t_learn = np.max(trj_t)
+
 exc_trajectory_input_rates = { m: {} for m in exc_input_rates_dict }
 inh_trajectory_input_rates = { m: {} for m in inh_input_rates_dict }
 exc_trajectory_inputs = []
@@ -139,6 +140,7 @@ for m in exc_input_rates_dict:
         input_rates[np.isclose(input_rates, 0., atol=1e-4, rtol=1e-4)] = 0.
         exc_trajectory_input_rates[m][i] = input_rates
         input_rates_ip = Akima1DInterpolator(trj_t, input_rates)
+#        exc_trajectory_inputs.append(lambda t: input_rates_ip(t) if t < t_learn else 0.)
         exc_trajectory_inputs.append(input_rates_ip)
         
 for m in inh_input_rates_dict:
@@ -147,6 +149,7 @@ for m in inh_input_rates_dict:
         input_rates[np.isclose(input_rates, 0., atol=1e-4, rtol=1e-4)] = 0.
         inh_trajectory_input_rates[m][i] = input_rates
         input_rates_ip = Akima1DInterpolator(trj_t, input_rates)
+#        inh_trajectory_inputs.append(lambda t: input_rates_ip(t) if t < t_learn else 0.)
         inh_trajectory_inputs.append(input_rates_ip)
 
         
@@ -160,7 +163,6 @@ n_outputs=50
 n_exc=len(exc_trajectory_inputs)
 n_inh=100
 
-t_learn = 28.284
 
 params = {'w_initial_E': 0.01, 
           'w_initial_EI': 0.012681074, 
@@ -183,6 +185,7 @@ params = {'w_initial_E': 0.1,
           'w_initial_EI': 1e-3,
           'w_initial_I': -0.01, 
           'w_EI_Ext': 1e-3,
+          'w_RCL': 0.005, 
           'w_DEC_E': 0.005, 
           'w_DEC_I': 0.002, 
           'p_E_srf': 0.1, 
@@ -190,6 +193,7 @@ params = {'w_initial_E': 0.1,
           'p_EI': 0.1,
           'p_EI_Ext': 0.007,
           'p_DEC': 0.1, 
+          'p_RCL': 0.4, 
           'tau_E': 0.005, 
           'tau_I': 0.020, 
           'tau_input': 0.1,
@@ -198,15 +202,24 @@ params = {'w_initial_E': 0.1,
           'learning_rate_D': 0.001}
 
 dt = 0.01
-model_dict = build_network(params, inputs=exc_trajectory_inputs, 
-                           n_outputs=n_outputs, n_exc=n_exc, n_inh=n_inh, n_inh_decoder=n_inh,
+model_dict = build_network(params, inputs=exc_trajectory_inputs, oob_value=0.,
+                           n_outputs=n_outputs, n_exc=n_exc, n_inh=n_inh, n_inh_decoder=n_inh, n_recall=2,
                            coords=None, seed=seed, t_learn=t_learn)
-print(f"t_end = {t_end}")
-results = run(model_dict, t_end, dt=dt, save_results=True)
+t_end = 32.
+
+network = model_dict['network']
+with network as model:
+    recall_input = nengo.Node(lambda t: 1 if t > 30 and t < 31 else 0)
+    recall_conn = nengo.Connection(recall_input, network.recall.neurons[0])
+    p_recall_input = nengo.Probe(recall_input)
+    
+sim, results = run(model_dict, t_end, dt=dt, save_results=True)
 srf_autoenc_output_rates = results['srf_autoenc_output_rates']
 srf_autoenc_decoder_rates = results['srf_autoenc_decoder_rates']
 srf_autoenc_decoder_inh_rates = results['srf_autoenc_decoder_inh_rates']
 srf_autoenc_exc_rates = results['srf_autoenc_exc_rates']
+srf_autoenc_recall_spikes = results['srf_autoenc_recall_spikes']
+srf_autoenc_recall_weights = results['srf_autoenc_recall_weights']
 
 print(f"output modulation depth: {np.mean(modulation_depth(srf_autoenc_output_rates))}")
 print(f"decoder modulation depth: {np.mean(modulation_depth(srf_autoenc_decoder_rates))}")
@@ -214,9 +227,18 @@ print(f"decoder modulation depth: {np.mean(modulation_depth(srf_autoenc_decoder_
 print(f"input fraction active: {np.mean(fraction_active(srf_autoenc_exc_rates))}")
 print(f"output fraction active: {np.mean(fraction_active(srf_autoenc_output_rates))}")
 print(f"decoder fraction active: {np.mean(fraction_active(srf_autoenc_decoder_rates))}")
-print(f"decoder mse: {np.mean(mse(srf_autoenc_decoder_rates, srf_autoenc_exc_rates))}")
+print(f"decoder mse: {np.mean(mse(srf_autoenc_decoder_rates, srf_autoenc_exc_rates))}") 
 
 
+plt.imshow(srf_autoenc_exc_rates.T, aspect="auto", interpolation="nearest")
+plt.colorbar()
+plt.show()
 plt.imshow(srf_autoenc_output_rates.T, aspect="auto", interpolation="nearest")
+plt.colorbar()
+plt.show()
+plt.imshow(srf_autoenc_decoder_rates.T, aspect="auto", interpolation="nearest")
+plt.colorbar()
+plt.show()
+plt.imshow(srf_autoenc_recall_spikes.T, aspect="auto", interpolation="nearest")
 plt.colorbar()
 plt.show()

@@ -32,15 +32,17 @@ def array_input(input_matrix, dt, t, oob_value=None):
         return input_matrix[i].ravel()
 
 
-def callable_input(inputs, t, centered=False):
+def callable_input(inputs, oob_value, t, centered=False):
     if centered:
         result = np.asarray([ 2.*y(t) - 1. for y in inputs ])
     else:
         result = np.asarray([ y(t) for y in inputs ])
+    if len(np.isnan(result)) > 0:
+        result[np.isnan(result)] = oob_value
     return result
 
 
-def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n_exc=None, n_inh=None, n_inh_decoder=None, seed=0, dt=None, t_learn=None):
+def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n_exc=None, n_inh=None, n_inh_decoder=None, n_recall=None, seed=0, dt=None, t_learn=None):
     
     local_random = np.random.RandomState(seed)
 
@@ -53,11 +55,14 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
 
     decoder_coords = coords.get('decoder', None)
     decoder_inh_coords = coords.get('decoder_inh', None)
+    recall_coords = coords.get('recall', None)
     
     if type(inputs) == np.ndarray:
         n_inputs = np.product(inputs.shape[1:])
     else:
         n_inputs = len(inputs)
+    if recall_coords is not None:
+        n_recall = recall_coords.shape[0]
     if srf_output_coords is not None:
         n_outputs = srf_output_coords.shape[0]
     if srf_exc_coords is not None:
@@ -67,6 +72,8 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
     if decoder_inh_coords is not None:
         n_inh_decoder = decoder_inh_coords.shape[0]
 
+    if n_recall is None:
+        raise RuntimeError("n_recall is not provided and recall coordinates are not provided")
     if n_outputs is None:
         raise RuntimeError("n_outputs is not provided and srf_output coordinates are not provided")
     if n_exc is None:
@@ -76,6 +83,10 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
     if n_inh_decoder is None:
         raise RuntimeError("n_inh_decoder is not provided and decoder_inh coordinates are not provided")
 
+    if srf_exc_coords is None:
+        srf_exc_coords = np.asarray(range(n_exc)).reshape((n_exc,1)) / n_exc
+    if recall_coords is None:
+        recall_coords = np.asarray(range(n_recall)).reshape((n_recall,1)) / n_recall
     if decoder_coords is None:
         decoder_coords = np.asarray(range(n_exc)).reshape((n_exc,1)) / n_exc
     if decoder_inh_coords is None:
@@ -90,7 +101,7 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
             raise RuntimeError("dt is not provided when array input is provided")
         exc_input_func = partial(array_input, inputs, dt, oob_value=oob_value)
     else:
-        exc_input_func = partial(callable_input, inputs)
+        exc_input_func = partial(callable_input, inputs, oob_value)
         
     with autoencoder_network as model:
 
@@ -123,6 +134,31 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
                           isp_target_rate = 2.0,
                           label="Spatial receptive field network",
                           seed=seed)
+        
+        model.recall = nengo.Ensemble(n_recall, dimensions=1,
+                                      neuron_type = nengo.LIF(),
+                                      radius = 1,
+                                      intercepts=nengo.dists.Choice([0.1]),
+                                      max_rates=nengo.dists.Choice([40]))
+        
+        tau_E = params['tau_E']
+        w_RCL = params['w_RCL']
+        p_RCL = params['p_RCL']
+        weights_initial_RCL = local_random.uniform(size=n_recall*n_exc).reshape((n_exc, n_recall)) * w_RCL
+        for i in range(n_recall):
+            target_choices = np.asarray(range(n_exc))
+            dist = cdist(recall_coords[i,:].reshape((1,-1)), srf_exc_coords[target_choices]).flatten()
+            sigma = 0.1 * p_RCL * n_exc
+            prob = distance_probs(dist, sigma)
+            targets_Out = np.asarray(local_random.choice(target_choices, round(p_RCL * n_exc), replace=False, p=prob),
+                                     dtype=np.int32)
+            weights_initial_RCL[np.logical_not(np.in1d(range(n_exc), targets_Out)), i] = 0.
+
+
+        model.conn_RCL = nengo.Connection(model.recall.neurons,
+                                          srf_network.output.neurons,
+                                          transform=weights_initial_RCL,
+                                          synapse=nengo.Alpha(tau_E))
         
         decoder = nengo.Ensemble(n_exc, dimensions=1,
                                  neuron_type = nengo.LIF(),
@@ -207,12 +243,15 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
             p_srf_exc_spikes = nengo.Probe(srf_network.exc.neurons, 'output')
             p_srf_inh_spikes = nengo.Probe(srf_network.inh.neurons, 'output')
             #p_srf_inh_weights = nengo.Probe(srf_network.conn_I, 'weights')
-            #p_srf_exc_weights = nengo.Probe(srf_network.conn_E, 'weights')
+            p_srf_exc_weights = nengo.Probe(srf_network.conn_E, 'weights', sample_every=1.0)
             #if srf_network.conn_EE is not None:
             #    p_srf_rec_weights = nengo.Probe(srf_network.conn_EE, 'weights')
                 
+        p_recall_spikes = nengo.Probe(model.recall.neurons, synapse=None)
         p_decoder_spikes = nengo.Probe(decoder.neurons, synapse=None)
         p_decoder_inh_spikes = nengo.Probe(decoder_inh.neurons, synapse=None)
+
+        p_recall_weights = nengo.Probe(model.conn_RCL, 'weights', sample_every=1.0)
 
         model.srf_network = srf_network
         model.decoder_ens = decoder
@@ -222,11 +261,16 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
              'neuron_probes': {'srf_output_spikes': p_srf_output_spikes,
                                'srf_exc_spikes': p_srf_exc_spikes,
                                'srf_inh_spikes': p_srf_inh_spikes,
+                               'recall_spikes': p_recall_spikes,
                                'decoder_spikes': p_decoder_spikes,
-                               'decoder_inh_spikes': p_decoder_inh_spikes},
-#             'weight_probes': {'srf_inh_weights': p_srf_inh_weights,
+                               'decoder_inh_spikes': p_decoder_inh_spikes,
+             },
+             'weight_probes': { 'srf_exc_weights': p_srf_exc_weights,
+                                'recall_weights': p_recall_weights,
+#                               'srf_inh_weights': p_srf_inh_weights,
 #                               'srf_exc_weights': p_srf_exc_weights,
-#                               'srf_rec_weights': p_srf_rec_weights}
+#                               'srf_rec_weights': p_srf_rec_weights
+                                }
     }
 
 
@@ -240,8 +284,15 @@ def run(model_dict, t_end, dt=0.001, save_results=False):
     p_srf_exc_spikes = model_dict['neuron_probes']['srf_exc_spikes']
     p_srf_inh_spikes = model_dict['neuron_probes']['srf_inh_spikes']
     p_decoder_spikes = model_dict['neuron_probes']['decoder_spikes']
+    p_recall_spikes = model_dict['neuron_probes']['recall_spikes']
     p_decoder_inh_spikes = model_dict['neuron_probes']['decoder_inh_spikes']
+    p_srf_exc_weights = model_dict['weight_probes']['srf_exc_weights']
+    p_recall_weights = model_dict['weight_probes']['recall_weights']
+
+    srf_exc_weights = sim.data[p_srf_exc_weights]
     srf_output_spikes = sim.data[p_srf_output_spikes]
+    recall_spikes = sim.data[p_recall_spikes]
+    recall_weights = sim.data[p_recall_weights]
     decoder_spikes = sim.data[p_decoder_spikes]
     decoder_inh_spikes = sim.data[p_decoder_inh_spikes]
     srf_exc_rates = rates_kernel(sim.trange(), sim.data[p_srf_exc_spikes], tau=0.1)
@@ -250,22 +301,25 @@ def run(model_dict, t_end, dt=0.001, save_results=False):
     decoder_rates = rates_kernel(sim.trange(), decoder_spikes, tau=0.1)
     decoder_inh_rates = rates_kernel(sim.trange(), decoder_inh_spikes, tau=0.1)
     if save_results:
+        np.save("srf_autoenc_exc_weights", np.asarray(srf_exc_weights, dtype=np.float32))
         np.save("srf_autoenc_exc_rates", np.asarray(srf_exc_rates, dtype=np.float32))
         np.save("srf_autoenc_inh_rates", np.asarray(srf_inh_rates, dtype=np.float32))
         np.save("srf_autoenc_output_spikes", np.asarray(srf_output_spikes, dtype=np.float32))
+        np.save("srf_autoenc_recall_spikes", np.asarray(recall_spikes, dtype=np.float32))
         np.save("srf_autoenc_decoder_spikes", np.asarray(decoder_spikes, dtype=np.float32))
         np.save("srf_autoenc_output_rates", np.asarray(srf_output_rates, dtype=np.float32))
         np.save("srf_autoenc_decoder_rates", np.asarray(decoder_rates, dtype=np.float32))
         np.save("srf_autoenc_decoder_inh_rates", np.asarray(decoder_inh_rates, dtype=np.float32))
         np.save("srf_autoenc_time_range", np.asarray(sim.trange(), dtype=np.float32))
 
-    return {'srf_autoenc_output_rates': srf_output_rates,
-            'srf_autoenc_decoder_rates': decoder_rates,
-            'srf_autoenc_decoder_inh_rates': decoder_inh_rates,
-            'srf_autoenc_exc_rates': srf_exc_rates,
-            'srf_autoenc_inh_rates': srf_inh_rates,
-            'srf_autoenc_output_spikes': srf_output_spikes,
-            'srf_autoenc_decoder_spikes': decoder_spikes,
-
+    return sim, {'srf_autoenc_output_rates': srf_output_rates,
+                 'srf_autoenc_decoder_rates': decoder_rates,
+                 'srf_autoenc_decoder_inh_rates': decoder_inh_rates,
+                 'srf_autoenc_exc_rates': srf_exc_rates,
+                 'srf_autoenc_inh_rates': srf_inh_rates,
+                 'srf_autoenc_output_spikes': srf_output_spikes,
+                 'srf_autoenc_decoder_spikes': decoder_spikes,
+                 'srf_autoenc_recall_spikes': recall_spikes,
+                 'srf_autoenc_recall_weights': recall_weights,
             
     }
