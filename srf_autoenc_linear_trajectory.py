@@ -1,7 +1,7 @@
-
 import random
 from functools import partial
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib import cm
 import scipy.interpolate
@@ -13,6 +13,8 @@ from nengo_extras.neurons import (
     rates_kernel, rates_isi )
 from linear_trajectory import generate_linear_trajectory, generate_input_rates
 from srf_autoenc import build_network, run
+
+mpl.rcParams['font.size'] = 18
 
 
 def mse(rates, target_rates):
@@ -54,7 +56,7 @@ def fraction_active(rates):
         #logger.info(f"fraction_active {i}: a: {a} n: {n} fraction: {float(a) / float(n)}")
     return bin_fraction_active
 
-def plot_input_rates(input_rates_dict):
+def plot_input_rates(input_rates_dict, trajectory=None):
     for m in input_rates_dict:
         plt.figure()
         arena_map = np.zeros(arena_xx.shape)
@@ -62,10 +64,16 @@ def plot_input_rates(input_rates_dict):
             input_rates = input_rates_dict[m][i](arena_xx, arena_yy)
             arena_map += input_rates
         plt.pcolor(arena_xx, arena_yy, arena_map, cmap=cm.jet)
-        #plt.plot(trj_x, trj_y)
+        if trajectory is not None:
+            _, trj_x, trj_y, _ = trajectory
+            plt.plot(trj_x, trj_y, linewidth=4.0)
         ax = plt.gca()
         ax.set_aspect('equal')
-        plt.colorbar()
+        ax.set_xlabel('X position [cm]')
+        ax.set_ylabel('Y position [cm]')
+        plt.colorbar(label='Firing rate [Hz]')
+        plt.tight_layout()
+        
         plt.show()
 
 
@@ -75,7 +83,7 @@ def wrap_oob(ip, ub, oob_value, x):
     else:
         return ip(x)
 
-arena_margin = 0.25
+arena_margin = 0.50
 arena_dimension = 200
 arena_extent = arena_dimension * (1. + arena_margin)
 vert = np.array([[-arena_extent,-arena_extent],[-arena_extent,arena_extent],
@@ -103,8 +111,8 @@ print(f"exc_module_field_width_dict: {exc_module_field_width_dict}")
     
 exc_input_nodes_dict, exc_input_groups_dict, exc_input_rates_dict = \
     generate_input_rates((vert,smp), exc_module_field_width_dict,
-                         spacing_factor=[ 0.02*exc_field_width( (float(i) / float(nmodules_exc)) ) for i in range(nmodules_exc) ],
-                         peak_rate=peak_rate)
+                         spacing_factor=[ 0.025*exc_field_width( (float(i) / float(nmodules_exc)) ) for i in range(nmodules_exc) ],
+                         peak_rate=[peak_rate*(1 - (float(i) / float(nmodules_exc)))  for i in range(nmodules_exc) ])
 inh_input_nodes_dict, inh_input_groups_dict, inh_input_rates_dict = \
     generate_input_rates((vert,smp), inh_module_field_width_dict, basis_function='inverse',
                          spacing_factor=1.4, peak_rate=peak_rate)
@@ -153,8 +161,8 @@ for m in inh_input_rates_dict:
         inh_trajectory_inputs.append(input_rates_ip)
 
         
-plot_input_rates(exc_input_rates_dict)
-plot_input_rates(inh_input_rates_dict)
+plot_input_rates(exc_input_rates_dict, (trj_t, trj_x, trj_y, trj_d))
+plot_input_rates(inh_input_rates_dict, (trj_t, trj_x, trj_y, trj_d))
 
 
 seed = 19
@@ -164,7 +172,7 @@ n_exc=len(exc_trajectory_inputs)
 n_inh=100
 
 
-params = {'w_initial_E': 0.01, 
+params = {'w_initial_E': 0.01,
           'w_initial_EI': 0.012681074, 
           'w_initial_I': -0.028862255, 
           'w_EI_Ext': 0.02956312, 
@@ -183,35 +191,41 @@ params = {'w_initial_E': 0.01,
                 
 params = {'w_initial_E': 0.1, 
           'w_initial_EI': 1e-3,
+          'w_initial_EE': 0.01, 
           'w_initial_I': -0.01, 
+          'w_initial_I_DEC_fb': -0.05, 
           'w_EI_Ext': 1e-3,
           'w_RCL': 0.005, 
           'w_DEC_E': 0.005, 
           'w_DEC_I': 0.002, 
           'p_E_srf': 0.1, 
-          'p_EE': 0.01, 
+          'p_EE': 0.05, 
           'p_EI': 0.1,
           'p_EI_Ext': 0.007,
           'p_DEC': 0.1, 
-          'p_RCL': 0.4, 
+          'p_RCL': 0.2, 
           'tau_E': 0.005, 
           'tau_I': 0.020, 
           'tau_input': 0.1,
+          'delay_unit_EE': 0.1,
           'learning_rate_I': 0.01, 
           'learning_rate_E': 0.04,
-          'learning_rate_D': 0.001}
+          'learning_rate_EE': 1e-5,
+          'learning_rate_D': 0.08}
 
 dt = 0.01
 model_dict = build_network(params, inputs=exc_trajectory_inputs, oob_value=0.,
                            n_outputs=n_outputs, n_exc=n_exc, n_inh=n_inh, n_inh_decoder=n_inh, n_recall=2,
-                           coords=None, seed=seed, t_learn=t_learn)
-t_end = 35.
+                           coords=None, seed=seed, t_learn=t_learn, dt=dt)
+t_end = 30.
 
 network = model_dict['network']
 with network as model:
-    recall_input = nengo.Node(lambda t: 1 if t > 30 and t < 34 else 0)
-    recall_conn = nengo.Connection(recall_input, network.recall.neurons[0])
-    p_recall_input = nengo.Probe(recall_input)
+    recall_input1 = nengo.Node(lambda t: 1 if t > 30 and t < 32 else 0)
+    recall_conn1 = nengo.Connection(recall_input1, network.recall.neurons[0])
+    recall_input2 = nengo.Node(lambda t: 1 if t > 32 and t < 34 else 0)
+    recall_conn2 = nengo.Connection(recall_input2, network.recall.neurons[1])
+    p_recall_input = nengo.Probe(recall_input1)
     
 sim, results = run(model_dict, t_end, dt=dt, save_results=True)
 srf_autoenc_output_rates = results['srf_autoenc_output_rates']
@@ -230,15 +244,31 @@ print(f"decoder fraction active: {np.mean(fraction_active(srf_autoenc_decoder_ra
 print(f"decoder mse: {np.mean(mse(srf_autoenc_decoder_rates, srf_autoenc_exc_rates))}") 
 
 
-plt.imshow(srf_autoenc_exc_rates.T, aspect="auto", interpolation="nearest")
-plt.colorbar()
+plt.imshow(srf_autoenc_exc_rates.T, aspect="auto", interpolation="nearest", cmap='jet')
+ax = plt.gca()
+ax.set_xlabel('Time [ms]')
+ax.set_ylabel('Neuron')
+plt.colorbar(label='Firing rate [Hz]')
+plt.tight_layout()
 plt.show()
-plt.imshow(srf_autoenc_output_rates.T, aspect="auto", interpolation="nearest")
-plt.colorbar()
+plt.imshow(srf_autoenc_output_rates.T, aspect="auto", interpolation="nearest", cmap='jet')
+ax = plt.gca()
+ax.set_xlabel('Time [ms]')
+ax.set_ylabel('Neuron')
+plt.colorbar(label='Firing rate [Hz]')
+plt.tight_layout()
 plt.show()
-plt.imshow(srf_autoenc_decoder_rates.T, aspect="auto", interpolation="nearest")
-plt.colorbar()
+plt.imshow(srf_autoenc_decoder_rates.T, aspect="auto", interpolation="nearest", cmap='jet')
+ax = plt.gca()
+ax.set_xlabel('Time [ms]')
+ax.set_ylabel('Neuron')
+plt.colorbar(label='Firing rate [Hz]')
+plt.tight_layout()
 plt.show()
-plt.imshow(srf_autoenc_recall_spikes.T, aspect="auto", interpolation="nearest")
-plt.colorbar()
+plt.imshow(srf_autoenc_recall_spikes.T, aspect="auto", interpolation="nearest", cmap='jet')
+ax = plt.gca()
+ax.set_xlabel('Time [ms]')
+ax.set_ylabel('Neuron')
+plt.colorbar(label='Firing rate [Hz]')
+plt.tight_layout()
 plt.show()

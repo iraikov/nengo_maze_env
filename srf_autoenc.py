@@ -108,7 +108,7 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
         
         srf_network = PRF(exc_input_func = exc_input_func,
                           connect_exc_inh_input = True,
-                          connect_out_out = False,
+                          connect_out_out = True,
                           n_excitatory = n_exc,
                           n_inhibitory = n_inh,
                           n_outputs = n_outputs,
@@ -120,6 +120,7 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
                           w_initial_E = params['w_initial_E'],
                           w_initial_I = params['w_initial_I'],
                           w_initial_EI = params['w_initial_EI'],
+                          w_initial_EE = params['w_initial_EE'],
                           w_EI_Ext = params['w_EI_Ext'],
                           p_E = params['p_E_srf'],
                           p_EE = params['p_EE'],
@@ -130,8 +131,11 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
                           tau_input = params['tau_input'],
                           learning_rate_I=params['learning_rate_I'],
                           learning_rate_E=params['learning_rate_E'],
+                          learning_rate_EE=params.get('learning_rate_EE', 1e-5),
                           sigma_scale_E = 0.005,
                           isp_target_rate = 2.0,
+                          delay_unit_EE=params.get('delay_unit_EE', None),
+                          dt=dt,
                           label="Spatial receptive field network",
                           seed=seed)
         
@@ -148,7 +152,7 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
         for i in range(n_recall):
             target_choices = np.asarray(range(n_outputs))
             dist = cdist(recall_coords[i,:].reshape((1,-1)), srf_exc_coords[target_choices]).flatten()
-            sigma = 0.1 * p_RCL * n_outputs
+            sigma = 0.01 * p_RCL * n_outputs
             prob = distance_probs(dist, sigma)
             targets_Out = np.asarray(local_random.choice(target_choices, round(p_RCL * n_outputs), replace=False, p=prob),
                                      dtype=np.int32)
@@ -186,7 +190,8 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
         conn_DEC_E = nengo.Connection(srf_network.output.neurons,
                                       decoder.neurons,
                                       transform=weights_initial_DEC_E,
-                                      synapse=nengo.Alpha(tau_E))
+                                      synapse=nengo.Alpha(tau_E),
+                                      learning_rule_type=HSP(learning_rate=0.01, directed=False))
 
                 
         w_DEC_I_ff = params['w_DEC_I']
@@ -202,7 +207,7 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
                                          transform=weights_initial_DEC_I_ff,
                                          synapse=nengo.Alpha(tau_E))
     
-        w_DEC_I_fb = params['w_initial_I']
+        w_DEC_I_fb = params['w_initial_I_DEC_fb']
         weights_initial_DEC_I_fb = local_random.uniform(size=n_inh_decoder*n_exc).reshape((n_exc, n_inh_decoder)) * w_DEC_I_fb
         for i in range(n_exc):
             dist = cdist(decoder_coords[i,:].reshape((1,-1)), decoder_inh_coords).flatten()
@@ -244,8 +249,8 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
             p_srf_inh_spikes = nengo.Probe(srf_network.inh.neurons, 'output')
             #p_srf_inh_weights = nengo.Probe(srf_network.conn_I, 'weights')
             p_srf_exc_weights = nengo.Probe(srf_network.conn_E, 'weights', sample_every=1.0)
-            #if srf_network.conn_EE is not None:
-            #    p_srf_rec_weights = nengo.Probe(srf_network.conn_EE, 'weights')
+            if srf_network.conn_EE is not None:
+                p_srf_rec_weights = nengo.Probe(srf_network.conn_EE, 'weights', sample_every=1.0)
                 
         p_recall_spikes = nengo.Probe(model.recall.neurons, synapse=None)
         p_decoder_spikes = nengo.Probe(decoder.neurons, synapse=None)
@@ -266,10 +271,10 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
                                'decoder_inh_spikes': p_decoder_inh_spikes,
              },
              'weight_probes': { 'srf_exc_weights': p_srf_exc_weights,
+                                'srf_rec_weights': p_srf_rec_weights,
                                 'recall_weights': p_recall_weights,
 #                               'srf_inh_weights': p_srf_inh_weights,
 #                               'srf_exc_weights': p_srf_exc_weights,
-#                               'srf_rec_weights': p_srf_rec_weights
                                 }
     }
 
@@ -287,19 +292,21 @@ def run(model_dict, t_end, dt=0.001, save_results=False):
     p_recall_spikes = model_dict['neuron_probes']['recall_spikes']
     p_decoder_inh_spikes = model_dict['neuron_probes']['decoder_inh_spikes']
     p_srf_exc_weights = model_dict['weight_probes']['srf_exc_weights']
+    p_srf_rec_weights = model_dict['weight_probes']['srf_rec_weights']
     p_recall_weights = model_dict['weight_probes']['recall_weights']
 
+    srf_rec_weights = sim.data[p_srf_rec_weights]
     srf_exc_weights = sim.data[p_srf_exc_weights]
     srf_output_spikes = sim.data[p_srf_output_spikes]
     recall_spikes = sim.data[p_recall_spikes]
     recall_weights = sim.data[p_recall_weights]
     decoder_spikes = sim.data[p_decoder_spikes]
     decoder_inh_spikes = sim.data[p_decoder_inh_spikes]
-    srf_exc_rates = rates_kernel(sim.trange(), sim.data[p_srf_exc_spikes], tau=0.1)
-    srf_inh_rates = rates_kernel(sim.trange(), sim.data[p_srf_inh_spikes], tau=0.1)
-    srf_output_rates = rates_kernel(sim.trange(), srf_output_spikes, tau=0.1)
-    decoder_rates = rates_kernel(sim.trange(), decoder_spikes, tau=0.1)
-    decoder_inh_rates = rates_kernel(sim.trange(), decoder_inh_spikes, tau=0.1)
+    srf_exc_rates = rates_kernel(sim.trange(), sim.data[p_srf_exc_spikes], tau=0.2)
+    srf_inh_rates = rates_kernel(sim.trange(), sim.data[p_srf_inh_spikes], tau=0.2)
+    srf_output_rates = rates_kernel(sim.trange(), srf_output_spikes, tau=0.2)
+    decoder_rates = rates_kernel(sim.trange(), decoder_spikes, tau=0.2)
+    decoder_inh_rates = rates_kernel(sim.trange(), decoder_inh_spikes, tau=0.2)
     if save_results:
         np.save("srf_autoenc_exc_weights", np.asarray(srf_exc_weights, dtype=np.float32))
         np.save("srf_autoenc_exc_rates", np.asarray(srf_exc_rates, dtype=np.float32))
@@ -320,6 +327,8 @@ def run(model_dict, t_end, dt=0.001, save_results=False):
                  'srf_autoenc_output_spikes': srf_output_spikes,
                  'srf_autoenc_decoder_spikes': decoder_spikes,
                  'srf_autoenc_recall_spikes': recall_spikes,
+                 'srf_autoenc_exc_weights': srf_exc_weights,
+                 'srf_autoenc_rec_weights': srf_rec_weights,
                  'srf_autoenc_recall_weights': recall_weights,
             
     }

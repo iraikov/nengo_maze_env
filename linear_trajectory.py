@@ -31,7 +31,7 @@ def generate_linear_trajectory(input_trajectory, temporal_resolution=1., velocit
     spatial_resolution = velocity * temporal_resolution
     x = trajectory[:, 0]
     y = trajectory[:, 1]
-    
+
     if equilibration_duration is not None:
         equilibration_distance = velocity / equilibration_duration
         x = np.insert(x, 0, x[0] - equilibration_distance)
@@ -39,7 +39,7 @@ def generate_linear_trajectory(input_trajectory, temporal_resolution=1., velocit
     else:
         equilibration_duration = 0.
         equilibration_distance = 0.
-    
+
     segment_lengths = np.sqrt((np.diff(x) ** 2. + np.diff(y) ** 2.))
     distance = np.insert(np.cumsum(segment_lengths), 0, 0.)
     
@@ -47,7 +47,7 @@ def generate_linear_trajectory(input_trajectory, temporal_resolution=1., velocit
     interp_x = np.interp(interp_distance, distance, x)
     interp_y = np.interp(interp_distance, distance, y)
     t = interp_distance / velocity  # s
-    
+
     t = np.subtract(t, equilibration_duration)
     interp_distance -= equilibration_distance
     
@@ -65,6 +65,11 @@ def generate_input_rates(spatial_domain, module_field_width_dict, basis_function
     else:
         spacing_factors = spacing_factor
     print(f"spacing factors: {spacing_factors}")
+    if isinstance(peak_rate, float):
+        peak_rates = [peak_rate]*n_modules
+    else:
+        peak_rates = peak_rate
+    print(f"peak_rates: {peak_rates}")
     vert, smp = spatial_domain
     for m in sorted(module_field_width_dict):
         
@@ -77,7 +82,7 @@ def generate_input_rates(spatial_domain, module_field_width_dict, basis_function
         for i in range(nodes.shape[0]):
             xs = [[nodes[i,0], nodes[i,1]]]
             x_obs = np.asarray(xs).reshape((1,-1))
-            u_obs = np.asarray([[peak_rate]]).reshape((1,-1))
+            u_obs = np.asarray([[peak_rates[m]]]).reshape((1,-1))
             if basis_function == 'constant':
                 input_rate_ip  = lambda xx, yy: xx, yy
             else:

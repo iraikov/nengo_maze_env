@@ -10,6 +10,18 @@ import scipy
 from scipy.sparse import csc_matrix
 from scipy.spatial.distance import cdist
 
+# Delayed connection example from
+# https://www.nengo.ai/nengo/v3.1.0/examples/usage/delay-node.html
+class Delay:
+    def __init__(self, dimensions, timesteps=50):
+        self.history = np.zeros((timesteps, dimensions))
+
+    def step(self, t, x):
+        self.history = np.roll(self.history, -1)
+        self.history[-1] = x
+        return self.history[0]
+
+    
 def distance_probs(dist, sigma):
     weights = np.exp(-dist/sigma**2)
     prob = weights / weights.sum(axis=0)
@@ -66,6 +78,7 @@ class PRF(nengo.Network):
                  sigma_scale_E_Fb = 0.1,
                  label = None,
                  seed = 0,
+                 dt = None,
                  add_to_container = None,
                  weights_I = None,
                  weights_E = None,
@@ -109,6 +122,7 @@ class PRF(nengo.Network):
             weights_initial_E = weights_E
         else:
             weights_initial_E = rng.uniform(size=n_outputs*n_excitatory).reshape((n_outputs, n_excitatory)) * w_initial_E
+            print(f'np.max(weights_initial_E) = {np.max(weights_initial_E)}')
             for i in range(n_outputs):
                 dist = cdist(self.output_coordinates[i,:].reshape((1,-1)), self.exc_coordinates).flatten()
                 sigma = sigma_scale_E * p_E * n_excitatory
@@ -209,7 +223,7 @@ class PRF(nengo.Network):
                                                                    pre_synapse=nengo.Lowpass(0.1),
                                                                    post_synapse=nengo.Lowpass(0.1),
                                                                    )
-                                               if use_gdhl else HSP(learning_rate=learning_rate_E))
+                                               if use_gdhl else HSP(learning_rate=learning_rate_E, directed=True))
 
                 
             self.conn_EI = nengo.Connection(self.output.neurons,
@@ -217,14 +231,14 @@ class PRF(nengo.Network):
                                             transform=weights_initial_EI,
                                             synapse=nengo.Alpha(tau_EI))
 
+            self.conn_EE = None
+            self.delay_EE = None
             if connect_out_out and (self.n_outputs > 1):
                 self.conn_EE = nengo.Connection(self.output.neurons, 
                                                 self.output.neurons, 
                                                 transform=weights_initial_EE,
                                                 synapse=nengo.Alpha(tau_EE),
-                                                learning_rule_type=HSP(directed=True, learning_rate=learning_rate_EE))
-            else:
-                self.conn_EE = None
+                                                learning_rule_type=HSP(learning_rate=learning_rate_EE, directed=True))
 
             self.conn_E_Fb = None
             if connect_exc_fb:
