@@ -72,7 +72,7 @@ class PRF(nengo.Network):
                  exc_coordinates = None,
                  inh_coordinates = None,
                  output_coordinates = None,
-                 sigma_scale_E = 0.1,
+                 sigma_scale_E = 0.01,
                  sigma_scale_EE = 0.1,
                  sigma_scale_EI = 0.1,
                  sigma_scale_E_Fb = 0.1,
@@ -122,8 +122,8 @@ class PRF(nengo.Network):
             weights_initial_E = weights_E
         else:
             weights_initial_E = rng.uniform(size=n_outputs*n_excitatory).reshape((n_outputs, n_excitatory)) * w_initial_E
-            print(f'np.max(weights_initial_E) = {np.max(weights_initial_E)}')
             for i in range(n_outputs):
+                target_choices = np.asarray([ j for j in range(n_outputs) if i != j ])
                 dist = cdist(self.output_coordinates[i,:].reshape((1,-1)), self.exc_coordinates).flatten()
                 sigma = sigma_scale_E * p_E * n_excitatory
                 prob = distance_probs(dist, sigma)

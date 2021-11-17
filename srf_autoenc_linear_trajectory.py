@@ -189,7 +189,7 @@ params = {'w_initial_E': 0.01,
           'learning_rate_I': 0.01, 
           'learning_rate_E': 0.04596530}
                 
-params = {'w_initial_E': 0.1, 
+params = {'w_initial_E': 0.01, 
           'w_initial_EI': 1e-3,
           'w_initial_EE': 0.01, 
           'w_initial_I': -0.01, 
@@ -198,18 +198,17 @@ params = {'w_initial_E': 0.1,
           'w_RCL': 0.005, 
           'w_DEC_E': 0.005, 
           'w_DEC_I': 0.002, 
-          'p_E_srf': 0.1, 
+          'p_E_srf': 0.05, 
           'p_EE': 0.05, 
           'p_EI': 0.1,
           'p_EI_Ext': 0.007,
-          'p_DEC': 0.1, 
+          'p_DEC': 0.3, 
           'p_RCL': 0.2, 
           'tau_E': 0.005, 
           'tau_I': 0.020, 
           'tau_input': 0.1,
-          'delay_unit_EE': 0.1,
           'learning_rate_I': 0.01, 
-          'learning_rate_E': 0.04,
+          'learning_rate_E': 0.001,
           'learning_rate_EE': 1e-5,
           'learning_rate_D': 0.08}
 
@@ -217,7 +216,7 @@ dt = 0.01
 model_dict = build_network(params, inputs=exc_trajectory_inputs, oob_value=0.,
                            n_outputs=n_outputs, n_exc=n_exc, n_inh=n_inh, n_inh_decoder=n_inh, n_recall=2,
                            coords=None, seed=seed, t_learn=t_learn, dt=dt)
-t_end = 30.
+t_end = 35.
 
 network = model_dict['network']
 with network as model:
@@ -226,7 +225,15 @@ with network as model:
     recall_input2 = nengo.Node(lambda t: 1 if t > 32 and t < 34 else 0)
     recall_conn2 = nengo.Connection(recall_input2, network.recall.neurons[1])
     p_recall_input = nengo.Probe(recall_input1)
-    
+
+plt.imshow(network.srf_network.weights_initial_E.T, aspect='auto', interpolation='nearest')
+plt.colorbar(label='Synaptic weight')
+plt.show()
+
+plt.imshow(network.weights_initial_DEC_E.T, aspect='auto', interpolation='nearest')
+plt.colorbar(label='Synaptic weight')
+plt.show()
+
 sim, results = run(model_dict, t_end, dt=dt, save_results=True)
 srf_autoenc_output_rates = results['srf_autoenc_output_rates']
 srf_autoenc_decoder_rates = results['srf_autoenc_decoder_rates']
@@ -234,6 +241,7 @@ srf_autoenc_decoder_inh_rates = results['srf_autoenc_decoder_inh_rates']
 srf_autoenc_exc_rates = results['srf_autoenc_exc_rates']
 srf_autoenc_recall_spikes = results['srf_autoenc_recall_spikes']
 srf_autoenc_recall_weights = results['srf_autoenc_recall_weights']
+srf_autoenc_exc_weights = results['srf_autoenc_exc_weights']
 
 print(f"output modulation depth: {np.mean(modulation_depth(srf_autoenc_output_rates))}")
 print(f"decoder modulation depth: {np.mean(modulation_depth(srf_autoenc_decoder_rates))}")
@@ -243,6 +251,11 @@ print(f"output fraction active: {np.mean(fraction_active(srf_autoenc_output_rate
 print(f"decoder fraction active: {np.mean(fraction_active(srf_autoenc_decoder_rates))}")
 print(f"decoder mse: {np.mean(mse(srf_autoenc_decoder_rates, srf_autoenc_exc_rates))}") 
 
+plt.imshow(srf_autoenc_exc_weights[-1,:,:].T, aspect="auto", interpolation="nearest", cmap='jet')
+ax = plt.gca()
+plt.colorbar(label='Synaptic weights')
+plt.tight_layout()
+plt.show()
 
 plt.imshow(srf_autoenc_exc_rates.T, aspect="auto", interpolation="nearest", cmap='jet')
 ax = plt.gca()

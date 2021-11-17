@@ -179,19 +179,19 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
         tau_E = params['tau_E']
         w_DEC_E = params['w_DEC_E']
         p_DEC = params['p_DEC']
-        weights_initial_DEC_E = local_random.uniform(size=n_outputs*n_exc).reshape((n_exc, n_outputs)) * w_DEC_E
+        model.weights_initial_DEC_E = local_random.uniform(size=n_outputs*n_exc).reshape((n_exc, n_outputs)) * w_DEC_E
         for i in range(n_exc):
             dist = cdist(decoder_coords[i,:].reshape((1,-1)), srf_network.output_coordinates).flatten()
             sigma = 0.1
             prob = distance_probs(dist, sigma)    
             sources = np.asarray(local_random.choice(n_outputs, round(p_DEC * n_outputs), replace=False, p=prob), dtype=np.int32)
-            weights_initial_DEC_E[i, np.logical_not(np.in1d(range(n_outputs), sources))] = 0.
+            model.weights_initial_DEC_E[i, np.logical_not(np.in1d(range(n_outputs), sources))] = 0.
 
-        conn_DEC_E = nengo.Connection(srf_network.output.neurons,
-                                      decoder.neurons,
-                                      transform=weights_initial_DEC_E,
-                                      synapse=nengo.Alpha(tau_E),
-                                      learning_rule_type=HSP(learning_rate=0.01, directed=False))
+        model.conn_DEC_E = nengo.Connection(srf_network.output.neurons,
+                                            decoder.neurons,
+                                            transform=model.weights_initial_DEC_E,
+                                            synapse=nengo.Alpha(tau_E),
+                                            learning_rule_type=HSP(learning_rate=0.01, directed=False))
 
                 
         w_DEC_I_ff = params['w_DEC_I']
@@ -257,6 +257,7 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
         p_decoder_inh_spikes = nengo.Probe(decoder_inh.neurons, synapse=None)
 
         p_recall_weights = nengo.Probe(model.conn_RCL, 'weights', sample_every=1.0)
+        p_decoder_weights = nengo.Probe(model.conn_DEC_E, 'weights', sample_every=1.0)
 
         model.srf_network = srf_network
         model.decoder_ens = decoder
@@ -273,6 +274,7 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
              'weight_probes': { 'srf_exc_weights': p_srf_exc_weights,
                                 'srf_rec_weights': p_srf_rec_weights,
                                 'recall_weights': p_recall_weights,
+                                'decoder_weights': p_decoder_weights,
 #                               'srf_inh_weights': p_srf_inh_weights,
 #                               'srf_exc_weights': p_srf_exc_weights,
                                 }
@@ -294,6 +296,7 @@ def run(model_dict, t_end, dt=0.001, save_results=False):
     p_srf_exc_weights = model_dict['weight_probes']['srf_exc_weights']
     p_srf_rec_weights = model_dict['weight_probes']['srf_rec_weights']
     p_recall_weights = model_dict['weight_probes']['recall_weights']
+    p_decoder_weights = model_dict['weight_probes']['decoder_weights']
 
     srf_rec_weights = sim.data[p_srf_rec_weights]
     srf_exc_weights = sim.data[p_srf_exc_weights]
@@ -302,6 +305,7 @@ def run(model_dict, t_end, dt=0.001, save_results=False):
     recall_weights = sim.data[p_recall_weights]
     decoder_spikes = sim.data[p_decoder_spikes]
     decoder_inh_spikes = sim.data[p_decoder_inh_spikes]
+    decoder_weights = sim.data[p_decoder_weights]
     srf_exc_rates = rates_kernel(sim.trange(), sim.data[p_srf_exc_spikes], tau=0.2)
     srf_inh_rates = rates_kernel(sim.trange(), sim.data[p_srf_inh_spikes], tau=0.2)
     srf_output_rates = rates_kernel(sim.trange(), srf_output_spikes, tau=0.2)
@@ -330,5 +334,6 @@ def run(model_dict, t_end, dt=0.001, save_results=False):
                  'srf_autoenc_exc_weights': srf_exc_weights,
                  'srf_autoenc_rec_weights': srf_rec_weights,
                  'srf_autoenc_recall_weights': recall_weights,
+                 'srf_autoenc_decoder_weights': decoder_weights,
             
     }
