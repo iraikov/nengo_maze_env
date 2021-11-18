@@ -7,6 +7,7 @@ from prf_net import PRF
 from cdisp import CDISP
 from hsp import HSP
 from isp import ISP
+from gsp import GSP
 import scipy.interpolate
 from scipy.interpolate import Rbf, PchipInterpolator, Akima1DInterpolator
 from scipy.spatial.distance import cdist
@@ -85,6 +86,8 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
 
     if srf_exc_coords is None:
         srf_exc_coords = np.asarray(range(n_exc)).reshape((n_exc,1)) / n_exc
+    if srf_output_coords is None:
+        srf_output_coords = np.asarray(range(n_outputs)).reshape((n_outputs,1)) / n_outputs
     if recall_coords is None:
         recall_coords = np.asarray(range(n_recall)).reshape((n_recall,1)) / n_recall
     if decoder_coords is None:
@@ -148,21 +151,25 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
         tau_E = params['tau_E']
         w_RCL = params['w_RCL']
         p_RCL = params['p_RCL']
-        weights_initial_RCL = local_random.uniform(size=n_recall*n_outputs).reshape((n_outputs, n_recall)) * w_RCL
+        learning_rate_RCL = params['learning_rate_RCL']
+        local_random_RCL = np.random.RandomState(seed+10)
+        model.weights_initial_RCL = np.ones((n_outputs, n_recall)) * w_RCL
+        target_choices = np.asarray(range(n_outputs))
+        sigma = (n_outputs/n_recall)*p_RCL
         for i in range(n_recall):
-            target_choices = np.asarray(range(n_outputs))
-            dist = cdist(recall_coords[i,:].reshape((1,-1)), srf_exc_coords[target_choices]).flatten()
-            sigma = 0.01 * p_RCL * n_outputs
+            dist = cdist(recall_coords[i,:].reshape((1,-1)), srf_output_coords[target_choices]).reshape((-1,))
             prob = distance_probs(dist, sigma)
-            targets_Out = np.asarray(local_random.choice(target_choices, round(p_RCL * n_outputs), replace=False, p=prob),
+            order = np.argsort(-prob)
+            targets_Out = np.asarray(target_choices[order][:round(p_RCL * n_outputs)],
                                      dtype=np.int32)
-            weights_initial_RCL[np.logical_not(np.in1d(range(n_outputs), targets_Out)), i] = 0.
+            model.weights_initial_RCL[np.logical_not(np.in1d(range(n_outputs), targets_Out)), i] = 0.
 
 
         model.conn_RCL = nengo.Connection(model.recall.neurons,
                                           srf_network.output.neurons,
-                                          transform=weights_initial_RCL,
-                                          synapse=nengo.Alpha(tau_E))
+                                          transform=model.weights_initial_RCL,
+                                          synapse=nengo.Alpha(tau_E),
+                                          learning_rule_type=GSP(learning_rate=learning_rate_RCL))
         
         decoder = nengo.Ensemble(n_exc, dimensions=1,
                                  neuron_type = nengo.LIF(),
@@ -191,7 +198,7 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
                                             decoder.neurons,
                                             transform=model.weights_initial_DEC_E,
                                             synapse=nengo.Alpha(tau_E),
-                                            learning_rule_type=HSP(learning_rate=0.01, directed=False))
+                                            learning_rule_type=HSP(learning_rate=params['learning_rate_D_Exc'], directed=True))
 
                 
         w_DEC_I_ff = params['w_DEC_I']
