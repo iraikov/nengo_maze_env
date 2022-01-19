@@ -1,4 +1,4 @@
-
+from functools import partial
 from nengo.exceptions import SimulationError, ValidationError, BuildError
 from nengo.neurons import LIF, LIFRate
 from nengo.builder import Builder, Operator, Signal
@@ -58,12 +58,12 @@ class RMSP(LearningRuleType):
     
     
 @jax.jit
-def step_jit(kappa, reward, pre_filtered, post_filtered, weights):
+def step_jit(kappa, reward, pre_filtered, rdelta, post_filtered, weights):
     factor = (1.0 - (jnp.square(weights) / jnp.dot(weights, weights))) * reward[0]
     return kappa * factor * rdelta * pre_filtered * post_filtered
     
 @jax.jit
-def apply_step_jit(kappa, post_filtered, pre_filtered, weights):
+def apply_step_jit(kappa, post_filtered, pre_filtered, weights, reward):
     rdelta = pre_filtered - reward
     step_vv = jax.vmap(partial(step_jit, kappa, reward, pre_filtered, rdelta))
     return step_vv(post_filtered, weights)
@@ -169,7 +169,7 @@ class SimRMSP(Operator):
         def step_simrmsp():
 
             if jit:
-                dw = apply_step_jit(kappa, post_filtered, pre_filtered, weights, reward, delta)
+                dw = apply_step_jit(kappa, post_filtered, pre_filtered, weights, reward)
                 delta[:, :] = np.clip(dw * mask, 0., None)
             else:
                 rdelta = pre_filtered - reward

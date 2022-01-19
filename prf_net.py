@@ -1,4 +1,3 @@
-
 import numpy as np
 import nengo
 from hsp import HSP
