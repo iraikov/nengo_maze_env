@@ -122,7 +122,6 @@ class SimHSP(Operator):
         self.incs = []
         self.reads = [pre_filtered, post_filtered, weights]
         self.updates = [delta]
-        assert(np.all(np.linalg.norm(weights.initial_value, axis=1) > 0.))
         self.sgn = np.ones(weights.initial_value.shape)
         self.directed = directed
         self.jit = jit

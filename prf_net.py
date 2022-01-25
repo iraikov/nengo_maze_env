@@ -26,6 +26,34 @@ def distance_probs(dist, sigma):
     prob = weights / weights.sum(axis=0)
     return prob
     
+
+def convergent_topo_transform(rng, n_pre, n_post, coords_pre, coords_post, p_initial, w_initial, sigma_scale):
+    transform = rng.uniform(size=n_pre*n_post).reshape((n_post, n_pre)) * w_initial
+    for i in range(n_post):
+        dist = cdist(coords_post[i,:].reshape((1,-1)), coords_pre).flatten()
+        sigma = sigma_scale * p_initial * n_pre
+        prob = distance_probs(dist, sigma)
+        sources = np.asarray(rng.choice(n_pre, round(p_initial * n_pre), replace=False, p=prob),
+                             dtype=np.int32)
+        transform[i, np.logical_not(np.in1d(range(n_pre), sources))] = 0.
+    return transform
+
+def divergent_topo_transform(rng, n_pre, n_post, coords_pre, coords_post, p_initial, w_initial, sigma_scale, exclude_self=False):
+    transform = rng.uniform(size=n_pre*n_post).reshape((n_post, n_pre)) * w_initial
+    for i in range(n_pre):
+        if exclude_self:
+            target_choices = np.asarray([ j for j in range(n_post) if i != j ])
+        else:
+            target_choices = np.asarray(range(n_post))
+        dist = cdist(coords_pre[i,:].reshape((1,-1)), coords_post[target_choices,:]).flatten()
+        sigma = sigma_scale * p_initial * n_post
+        prob = distance_probs(dist, sigma)
+        targets = np.asarray(rng.choice(target_choices, round(p_initial * n_post), replace=False, p=prob),
+                             dtype=np.int32)
+        transform[np.logical_not(np.in1d(range(n_post), targets)), i] = 0.
+        transform[targets, i] += rng.uniform(size=len(targets)) * w_initial
+    return transform
+
 ## Plastic receptive fields network
 
 class PRF(nengo.Network):
@@ -117,43 +145,28 @@ class PRF(nengo.Network):
         else:
             weights_initial_I = rng.uniform(size=n_inhibitory*n_outputs).reshape((n_outputs, n_inhibitory)) * w_initial_I
 
+        self.weights_initial_I = weights_initial_I
+
         if weights_E is not None:
             weights_initial_E = weights_E
         else:
-            weights_initial_E = rng.uniform(size=n_outputs*n_excitatory).reshape((n_outputs, n_excitatory)) * w_initial_E
-            for i in range(n_outputs):
-                target_choices = np.asarray([ j for j in range(n_outputs) if i != j ])
-                dist = cdist(self.output_coordinates[i,:].reshape((1,-1)), self.exc_coordinates).flatten()
-                sigma = sigma_scale_E * p_E * n_excitatory
-                prob = distance_probs(dist, sigma)
-                sources_Exc = np.asarray(rng.choice(n_excitatory, round(p_E * n_excitatory), replace=False, p=prob),
-                                         dtype=np.int32)
-                weights_initial_E[i, np.logical_not(np.in1d(range(n_excitatory), sources_Exc))] = 0.
-
+            weights_initial_E = convergent_topo_transform(rng, n_excitatory, n_outputs,
+                                                          self.exc_coordinates, self.output_coordinates,
+                                                          p_E, w_initial_E, sigma_scale_E)
         self.weights_initial_E = weights_initial_E
                 
-        weights_initial_EI = rng.uniform(size=n_outputs*n_inhibitory).reshape((n_inhibitory, n_outputs)) * w_initial_EI
-        for i in range(n_inhibitory):
-            dist = cdist(self.inh_coordinates[i,:].reshape((1,-1)), self.output_coordinates).flatten()
-            sigma = sigma_scale_EI * p_EI * n_outputs
-            prob = distance_probs(dist, sigma)
-            sources_Out = np.asarray(rng.choice(n_outputs, round(p_EI * n_outputs), replace=False, p=prob),
-                                         dtype=np.int32)
-            weights_initial_EI[i, np.logical_not(np.in1d(range(n_outputs), sources_Out))] = 0.
+        weights_initial_EI = convergent_topo_transform(rng, n_outputs, n_inhibitory,
+                                                       self.output_coordinates, self.inh_coordinates, 
+                                                       p_EI, w_initial_EI, sigma_scale_EI)
+        self.weights_initial_EI = weights_initial_EI
             
         if weights_EE is not None:
             weights_initial_EE = weights_EE
         else:
-            weights_initial_EE = rng.uniform(size=n_outputs*n_outputs).reshape((n_outputs, n_outputs)) * w_initial_EE
-            for i in range(n_outputs):
-                target_choices = np.asarray([ j for j in range(n_outputs) if i != j ])
-                dist = cdist(self.output_coordinates[i,:].reshape((1,-1)), self.output_coordinates[target_choices]).flatten()
-                sigma = sigma_scale_EE * p_EE * n_outputs
-
-                prob = distance_probs(dist, sigma)
-                targets_Out = np.asarray(rng.choice(target_choices, round(p_EE * n_outputs), replace=False, p=prob),
-                                        dtype=np.int32)
-                weights_initial_EE[i, np.logical_not(np.in1d(range(n_outputs), targets_Out))] = 0.
+            weights_initial_EE = divergent_topo_transform(rng, n_outputs, n_outputs,
+                                                          self.output_coordinates, self.output_coordinates,
+                                                          p_EE, w_initial_EE, sigma_scale_EE,
+                                                          exclude_self=True)
 
         with self:
 
@@ -184,15 +197,15 @@ class PRF(nengo.Network):
                 nengo.Connection(self.inh_input, self.inh.neurons,
                                 synapse=nengo.Alpha(tau_input),
                                 transform=np.eye(n_inhibitory) * w_input)
-                
+
+            self.conn_EI_Ext = None
             if connect_exc_inh_input:
-                weights_dist_EI_Ext = rng.uniform(size=n_excitatory*n_inhibitory).reshape((n_inhibitory, n_excitatory)) * w_EI_Ext
-                for i in range(n_inhibitory):
-                    sources_Exc = np.asarray(rng.choice(n_excitatory, round(p_EI_Ext * n_excitatory), replace=False), dtype=np.int32)
-                    weights_dist_EI_Ext[i, np.logical_not(np.in1d(range(n_excitatory), sources_Exc))] = 0.
-                nengo.Connection(self.exc.neurons, self.inh.neurons,
-                                 synapse=nengo.Alpha(tau_EI_Ext),
-                                 transform=weights_dist_EI_Ext)
+                weights_initial_EI_Ext = convergent_topo_transform(rng, n_excitatory, n_inhibitory,
+                                                                   self.exc_coordinates, self.inh_coordinates, 
+                                                                   p_EI_Ext, w_initial_EI, sigma_scale_EI)
+                self.conn_EI_Ext = nengo.Connection(self.exc.neurons, self.inh.neurons,
+                                                    synapse=nengo.Alpha(tau_EI_Ext),
+                                                    transform=weights_initial_EI_Ext)
                 
             
             self.conn_I = nengo.Connection(self.inh.neurons,
@@ -208,10 +221,10 @@ class PRF(nengo.Network):
                 for i in range(n_inhibitory):
                     sources_Inh = np.asarray(rng.choice(n_inhibitory, round(p_II * n_inhibitory), replace=False), dtype=np.int32)
                     weights_dist_II[i, np.logical_not(np.in1d(range(n_inhibitory), sources_Inh))] = 0.
-                    self.conn_II = nengo.Connection(self.inh.neurons,
-                                                    self.inh.neurons,
-                                                    transform=weights_dist_II,
-                                                    synapse=nengo.Alpha(tau_I))
+                self.conn_II = nengo.Connection(self.inh.neurons,
+                                                self.inh.neurons,
+                                                transform=weights_dist_II,
+                                                synapse=nengo.Alpha(tau_I))
                                                                                                                                     
             self.conn_E = nengo.Connection(self.exc.neurons,
                                            self.output.neurons, 
