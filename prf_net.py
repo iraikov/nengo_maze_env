@@ -73,6 +73,7 @@ class PRF(nengo.Network):
                  w_EI_Ext = 1e-3, # weight of excitatory connection to inhibitory inputs (when connect_exc_inh_input = True)
                  w_input = 1,
                  p_E = 0.3, # uniform probability of connection of excitatory inputs to outputs
+                 p_I = 0.3,
                  p_EI = 0.2, # uniform probability of feedback connections to inhibitory cells
                  p_EE = 0.05, # uniform probability of recurrent connections
                  p_EI_Ext = 0.25, # uniform probability of excitatory connection to inhibitory inputs (when connect_exc_inh_input = True)
@@ -102,7 +103,9 @@ class PRF(nengo.Network):
                  sigma_scale_E = 0.01,
                  sigma_scale_EE = 0.1,
                  sigma_scale_EI = 0.1,
+                 sigma_scale_EI_Ext = 0.1,
                  sigma_scale_E_Fb = 0.1,
+                 sigma_scale_I = 0.1,
                  label = None,
                  seed = 0,
                  dt = None,
@@ -143,16 +146,19 @@ class PRF(nengo.Network):
         if weights_I is not None:
             weights_initial_I = weights_I
         else:
-            weights_initial_I = rng.uniform(size=n_inhibitory*n_outputs).reshape((n_outputs, n_inhibitory)) * w_initial_I
+            #weights_initial_I = rng.uniform(size=n_inhibitory*n_outputs).reshape((n_outputs, n_inhibitory)) * w_initial_I
+            weights_initial_I = divergent_topo_transform(rng, n_inhibitory, n_outputs,
+                                                         self.inh_coordinates, self.output_coordinates,
+                                                         p_I, w_initial_I, sigma_scale_I)
 
         self.weights_initial_I = weights_initial_I
 
         if weights_E is not None:
             weights_initial_E = weights_E
         else:
-            weights_initial_E = convergent_topo_transform(rng, n_excitatory, n_outputs,
-                                                          self.exc_coordinates, self.output_coordinates,
-                                                          p_E, w_initial_E, sigma_scale_E)
+            weights_initial_E = divergent_topo_transform(rng, n_excitatory, n_outputs,
+                                                         self.exc_coordinates, self.output_coordinates,
+                                                         p_E, w_initial_E, sigma_scale_E)
         self.weights_initial_E = weights_initial_E
                 
         weights_initial_EI = convergent_topo_transform(rng, n_outputs, n_inhibitory,
@@ -202,7 +208,7 @@ class PRF(nengo.Network):
             if connect_exc_inh_input:
                 weights_initial_EI_Ext = convergent_topo_transform(rng, n_excitatory, n_inhibitory,
                                                                    self.exc_coordinates, self.inh_coordinates, 
-                                                                   p_EI_Ext, w_initial_EI, sigma_scale_EI)
+                                                                   p_EI_Ext, w_EI_Ext, sigma_scale_EI_Ext)
                 self.conn_EI_Ext = nengo.Connection(self.exc.neurons, self.inh.neurons,
                                                     synapse=nengo.Alpha(tau_EI_Ext),
                                                     transform=weights_initial_EI_Ext)
@@ -232,10 +238,13 @@ class PRF(nengo.Network):
                                            synapse=nengo.Alpha(tau_E),
                                            learning_rule_type=GDHL(sigma=gdhl_sigma, eta=gdhl_eta,
                                                                    learning_rate=learning_rate_E,
-                                                                   pre_synapse=nengo.Lowpass(0.1),
-                                                                   post_synapse=nengo.Lowpass(0.1),
+                                                                   pre_synapse=nengo.Lowpass(0.01),
+                                                                   post_synapse=nengo.Lowpass(0.01),
                                                                    )
-                                               if use_gdhl else HSP(learning_rate=learning_rate_E, directed=True))
+                                               if use_gdhl else HSP(learning_rate=learning_rate_E,
+                                                                    pre_synapse=nengo.Lowpass(0.01),
+                                                                    post_synapse=nengo.Lowpass(0.01),
+                                                                    directed=True))
 
                 
             self.conn_EI = nengo.Connection(self.output.neurons,
@@ -250,7 +259,10 @@ class PRF(nengo.Network):
                                                 self.output.neurons, 
                                                 transform=weights_initial_EE,
                                                 synapse=nengo.Alpha(tau_EE),
-                                                learning_rule_type=HSP(learning_rate=learning_rate_EE, directed=True))
+                                                learning_rule_type=HSP(learning_rate=learning_rate_EE,
+                                                                       pre_synapse=nengo.Lowpass(0.01),
+                                                                       post_synapse=nengo.Lowpass(0.01),
+                                                                       directed=True))
 
             self.conn_E_Fb = None
             if connect_exc_fb:
@@ -270,9 +282,12 @@ class PRF(nengo.Network):
                                                   synapse=nengo.Alpha(tau_E_Fb),
                                                   learning_rule_type=GDHL(sigma=gdhl_sigma, eta=gdhl_eta,
                                                                           learning_rate=learning_rate_E,
-                                                                          pre_synapse=nengo.Lowpass(0.1),
-                                                                          post_synapse=nengo.Lowpass(0.1),)
-                                                      if use_gdhl else HSP(learning_rate=learning_rate_E))
+                                                                          pre_synapse=nengo.Lowpass(0.01),
+                                                                          post_synapse=nengo.Lowpass(0.01),)
+                                                      if use_gdhl else HSP(learning_rate=learning_rate_E,
+                                                                          pre_synapse=nengo.Lowpass(0.01),
+                                                                          post_synapse=nengo.Lowpass(0.01)))
+
                         
                 
                              

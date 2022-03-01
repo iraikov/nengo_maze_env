@@ -11,7 +11,11 @@ from prf_net import PRF
 from rmsp import RMSP
 from hsp import HSP
 from nengo.utils.progress import TerminalProgressBar
+from nengo_extras.vision import Gabor, Mask
+from nengo_extras.gui import image_display_function
 
+
+image_shape = (1, 40, 30)
 
 class GodotEnvironment(object):
     
@@ -19,8 +23,9 @@ class GodotEnvironment(object):
 
         self.ws = websocket.WebSocket()
         self.ws.connect(address)
-        self.n_actions = 3
+        self.n_actions = 4
         self.state_dim = (40, 30)
+        self.im_dim = (30, 40)
         self.t=0
         self.stepsize = step_size
         self.current_action = 0
@@ -36,14 +41,14 @@ class GodotEnvironment(object):
             command = "aTurnRight"
         elif action == 2:
             command = "aMoveForward"
-#        elif action == 3:
-#            command = "aMoveBackward"
+        elif action == 3:
+            command = "aMoveBackward"
         else:
             raise RuntimeError('Unknown action {action}')
         self.ws.send(command)
         _, im = self.receive_data()
         im1 = ImageOps.grayscale(im)
-        self.state = np.array(im1.resize(self.state_dim)) / 256.0
+        self.state = np.array(im1.resize(self.im_dim, Image.ANTIALIAS)) / 256.0
         
     def sensor(self,t):
         return self.state.flatten()
@@ -69,10 +74,6 @@ class GodotEnvironment(object):
 
     
 env_iface = GodotEnvironment("ws://localhost:9080")
-#env.take_action(2)
-#env.take_action(1)
-#env.take_action(1)
-#env.take_action(2)
 
 
 tau = 0.01
@@ -82,8 +83,8 @@ slow_tau = 0.01
 
 
 n_place = 100
-n_input = 1000
-n_inhibitory = 200
+n_input = 200
+n_inhibitory = 100
 
 n_actor = 10
 n_critic = 50
@@ -93,9 +94,11 @@ actor_radius = 10
 
 seed = 19
 
+rng = np.random.RandomState(seed)
+
 srf_params = {
           'w_actor': 0.1,
-          'w_input': 0.1,
+          'w_input': 0.05,
           'w_initial_E': 0.01, 
           'w_initial_EI': 1e-3,
           'w_initial_EE': 0.001, 
@@ -112,7 +115,7 @@ srf_params = {
           'learning_rate_I': 0.01, 
           'learning_rate_E': 0.005,
           'learning_rate_EE': 1e-4
-             }
+}
 
     
 model=nengo.Network()
@@ -122,6 +125,13 @@ with model:
     sensor = nengo.Node(env_iface.sensor)
     sensor_net = nengo.Ensemble(n_neurons=n_input, dimensions=np.prod(env_iface.state_dim), radius=sensor_radius)
 
+    gabor_size = (5, 5)  # Size of the gabor filter
+
+    # Generate the encoders for the sensory ensemble
+    sensor_encoders = Gabor().generate(n_input, gabor_size, rng=rng)
+    sensor_encoders = Mask(image_shape).populate(sensor_encoders, rng=rng, flatten=True)
+    sensor_net.encoders = sensor_encoders
+    
     srf_net = PRF(n_excitatory = n_input,
                   n_inhibitory = n_inhibitory,
                   connect_exc_inh_input=True,
@@ -150,8 +160,12 @@ with model:
     nengo.Connection(actor_net, step_node, synapse=fast_tau)
 
 
-dt = 0.01    
-t_end = 10
-with nengo.Simulator(model, optimize=True, dt=dt, progress_bar=TerminalProgressBar()) as sim:
-    sim.run(np.max(t_end))
+    display_func = image_display_function(image_shape)
+    display_node = nengo.Node(display_func, size_in=sensor.size_out)
+    nengo.Connection(sensor, display_node, synapse=None)
+
+#dt = 0.01    
+#t_end = 10
+#with nengo.Simulator(model, optimize=True, dt=dt, progress_bar=TerminalProgressBar()) as sim:
+#    sim.run(np.max(t_end))
     
