@@ -214,21 +214,14 @@ params = {'w_initial_E': 0.01,
           'learning_rate_D_Exc': 0.005,
           'learning_rate_RCL': 0.0001}
 
-n_recall = 10
 dt = 0.01
 model_dict = build_network(params, inputs=exc_trajectory_inputs, oob_value=0.,
-                           n_outputs=n_outputs, n_exc=n_exc, n_inh=n_inh, n_inh_decoder=n_inh, n_recall=n_recall,
+                           n_outputs=n_outputs, n_exc=n_exc, n_inh=n_inh, n_inh_decoder=n_inh, 
                            coords=None, seed=seed, t_learn=t_learn, dt=dt)
 t_end = np.max(trj_t)
-t_end = 34.
 n_timesteps_trj = int(np.max(trj_t)/dt)
 
 network = model_dict['network']
-with network as model:
-    recall_input = nengo.Node(lambda t: 1 if t > 30 and t < 33 else 0)
-    recall_conn = nengo.Connection(recall_input, network.recall.neurons,
-                                   transform=np.ones((n_recall, 1) ))
-    p_recall_input = nengo.Probe(recall_input)
 
 plt.imshow(network.srf_network.weights_initial_E.T, aspect='auto', interpolation='nearest')
 plt.colorbar(label='Synaptic weight')
@@ -243,8 +236,6 @@ srf_autoenc_output_rates = results['srf_autoenc_output_rates']
 srf_autoenc_decoder_rates = results['srf_autoenc_decoder_rates']
 srf_autoenc_decoder_inh_rates = results['srf_autoenc_decoder_inh_rates']
 srf_autoenc_exc_rates = results['srf_autoenc_exc_rates']
-srf_autoenc_recall_spikes = results['srf_autoenc_recall_spikes']
-srf_autoenc_recall_weights = results['srf_autoenc_recall_weights']
 srf_autoenc_exc_weights = results['srf_autoenc_exc_weights']
 
 print(f"output modulation depth: {np.mean(modulation_depth(srf_autoenc_output_rates))}")
@@ -277,13 +268,6 @@ plt.colorbar(label='Firing rate [Hz]')
 plt.tight_layout()
 plt.show()
 plt.imshow(srf_autoenc_decoder_rates.T, aspect="auto", interpolation="nearest", cmap='jet')
-ax = plt.gca()
-ax.set_xlabel('Time [ms]')
-ax.set_ylabel('Neuron')
-plt.colorbar(label='Firing rate [Hz]')
-plt.tight_layout()
-plt.show()
-plt.imshow(srf_autoenc_recall_spikes.T, aspect="auto", interpolation="nearest", cmap='jet')
 ax = plt.gca()
 ax.set_xlabel('Time [ms]')
 ax.set_ylabel('Neuron')

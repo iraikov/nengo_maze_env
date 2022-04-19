@@ -196,8 +196,8 @@ class PRF(nengo.Network):
 
             if self.exc_input is not None:
                 nengo.Connection(self.exc_input, self.exc.neurons,
-                                synapse=nengo.Alpha(tau_input),
-                                transform=np.eye(n_excitatory) * w_input)
+                                 synapse=nengo.Alpha(tau_input),
+                                 transform=np.eye(n_excitatory) * w_input)
             
             if self.inh_input is not None:
                 nengo.Connection(self.inh_input, self.inh.neurons,
