@@ -20,17 +20,24 @@ def distance_probs(dist, sigma):
     prob = weights / weights.sum(axis=0)                                                                                           
     return prob                                                                                                                    
 
-def array_input(input_matrix, dt, t, oob_value=None):
-    i = int(t/dt)
-    if i >= input_matrix.shape[-1]:
-        i = -1
-    if i == -1:
-        if oob_value is None:
-            return input_matrix[i].ravel()
+class ArrayInput:
+
+    def __init__(self, input_matrix, oob_value, dt):
+        self.input_matrix = input_matrix
+        self.oob_value = oob_value
+        self.dt = dt
+
+    def array_input(self, t):
+        i = int(t/self.dt)
+        if i >= self.input_matrix.shape[-1]:
+            i = -1
+        if i == -1:
+            if self.oob_value is None:
+                return self.input_matrix[i].flatten()
+            else:
+                return np.ones(self.input_matrix[i].shape).flatten()*self.oob_value
         else:
-            return np.ones(input_matrix[i].shape)*oob_value
-    else:
-        return input_matrix[i].ravel()
+            return self.input_matrix[i].flatten()
 
 
 def callable_input(inputs, oob_value, t, centered=False):
@@ -61,6 +68,7 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
         n_inputs = np.product(inputs.shape[1:])
     else:
         n_inputs = len(inputs)
+    print(f'n_inputs = {n_inputs}')
     if srf_output_coords is not None:
         n_outputs = srf_output_coords.shape[0]
     if srf_exc_coords is not None:
@@ -95,7 +103,8 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
     if type(inputs) == np.ndarray:
         if dt is None:
             raise RuntimeError("dt is not provided when array input is provided")
-        exc_input_func = partial(array_input, inputs, dt, oob_value=oob_value)
+        array_input_obj = ArrayInput(inputs, oob_value, dt)
+        exc_input_func = array_input_obj.array_input
     else:
         exc_input_func = partial(callable_input, inputs, oob_value)
         
