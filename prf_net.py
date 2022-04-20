@@ -109,6 +109,7 @@ class PRF(nengo.Network):
                  label = None,
                  seed = 0,
                  dt = None,
+                 direct_input = True,
                  add_to_container = None,
                  weights_I = None,
                  weights_E = None,
@@ -179,7 +180,10 @@ class PRF(nengo.Network):
             self.exc_input = None
             self.inh_input = None
             if exc_input_func is not None:
-                self.exc_input = nengo.Node(output=exc_input_func, size_out=n_excitatory)
+                if direct_input:
+                    self.exc_input = nengo.Node(output=exc_input_func, size_out=n_excitatory)
+                else:
+                    self.exc_input = nengo.Node(output=exc_input_func, size_out=self.dimensions)
             if inh_input_func is not None:
                 self.inh_input = nengo.Node(output=inh_input_func, size_out=n_inhibitory)
                 
@@ -195,9 +199,14 @@ class PRF(nengo.Network):
                 self.output = nengo.Ensemble(self.n_outputs, dimensions=self.dimensions)
 
             if self.exc_input is not None:
-                nengo.Connection(self.exc_input, self.exc.neurons,
-                                 synapse=nengo.Alpha(tau_input),
-                                 transform=np.eye(n_excitatory) * w_input)
+                if direct_input:
+                    nengo.Connection(self.exc_input, self.exc.neurons,
+                                     synapse=nengo.Alpha(tau_input),
+                                     transform=np.eye(n_excitatory) * w_input)
+                else:
+                    nengo.Connection(self.exc_input, self.exc,
+                                     synapse=nengo.Alpha(tau_input))
+                    
             
             if self.inh_input is not None:
                 nengo.Connection(self.inh_input, self.inh.neurons,
@@ -253,7 +262,6 @@ class PRF(nengo.Network):
                                             synapse=nengo.Alpha(tau_EI))
 
             self.conn_EE = None
-            self.delay_EE = None
             if connect_out_out and (self.n_outputs > 1):
                 self.conn_EE = nengo.Connection(self.output.neurons, 
                                                 self.output.neurons, 

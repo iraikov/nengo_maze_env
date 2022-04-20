@@ -29,15 +29,17 @@ class ArrayInput:
 
     def array_input(self, t):
         i = int(t/self.dt)
-        if i >= self.input_matrix.shape[-1]:
+        if i >= self.input_matrix.shape[0]:
             i = -1
         if i == -1:
             if self.oob_value is None:
-                return self.input_matrix[i].flatten()
+                res = self.input_matrix[i].flatten()
             else:
-                return np.ones(self.input_matrix[i].shape).flatten()*self.oob_value
+                res = np.ones(self.input_matrix[i].shape).flatten()*self.oob_value
         else:
-            return self.input_matrix[i].flatten()
+            res = self.input_matrix[i].flatten()
+            
+        return res
 
 
 def callable_input(inputs, oob_value, t, centered=False):
@@ -50,7 +52,7 @@ def callable_input(inputs, oob_value, t, centered=False):
     return result
 
 
-def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n_exc=None, n_inh=None, n_inh_decoder=None, seed=0, dt=None, t_learn=None):
+def build_network(params, inputs, dimensions, input_encoders=None, direct_input=True, oob_value=None, coords=None, n_outputs=None, n_exc=None, n_inh=None, n_inh_decoder=None, seed=0, dt=None):
     
     local_random = np.random.RandomState(seed)
 
@@ -77,6 +79,7 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
         n_inh = srf_inh_coords.shape[0]
     if decoder_inh_coords is not None:
         n_inh_decoder = decoder_inh_coords.shape[0]
+        
 
     if n_outputs is None:
         raise RuntimeError("n_outputs is not provided and srf_output coordinates are not provided")
@@ -85,12 +88,14 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
     if n_inh is None:
         raise RuntimeError("n_exc is not provided and srf_inh coordinates are not provided")
     if n_inh_decoder is None:
-        raise RuntimeError("n_inh_decoder is not provided and decoder_inh coordinates are not provided")
+        n_inh_decoder = n_inh
 
     if srf_exc_coords is None:
         srf_exc_coords = np.asarray(range(n_exc)).reshape((n_exc,1)) / n_exc
     if srf_output_coords is None:
         srf_output_coords = np.asarray(range(n_outputs)).reshape((n_outputs,1)) / n_outputs
+    if srf_inh_coords is None:
+        srf_inh_coords = np.asarray(range(n_inh)).reshape((n_inh,1)) / n_inh
     if decoder_coords is None:
         decoder_coords = np.asarray(range(n_exc)).reshape((n_exc,1)) / n_exc
     if decoder_inh_coords is None:
@@ -111,7 +116,8 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
     with autoencoder_network as model:
 
         
-        srf_network = PRF(exc_input_func = exc_input_func,
+        srf_network = PRF(dimensions = dimensions,
+                          exc_input_func = exc_input_func,
                           connect_exc_inh_input = True,
                           connect_out_out = True,
                           n_excitatory = n_exc,
@@ -139,19 +145,23 @@ def build_network(params, inputs, oob_value=None, coords=None, n_outputs=None, n
                           learning_rate_EE=params.get('learning_rate_EE', 1e-5),
                           sigma_scale_E = 0.005,
                           isp_target_rate = 2.0,
-                          delay_unit_EE=params.get('delay_unit_EE', None),
+                          direct_input = direct_input,
                           dt=dt,
                           label="Spatial receptive field network",
                           seed=seed)
+
+
+        if input_encoders is not None:
+            srf_network.exc.encoders = input_encoders
         
         
-        decoder = nengo.Ensemble(n_exc, dimensions=1,
+        decoder = nengo.Ensemble(n_exc, dimensions=dimensions,
                                  neuron_type = nengo.LIF(),
                                  radius = 1,
                                  intercepts=nengo.dists.Choice([0.1]),
                                  max_rates=nengo.dists.Choice([40]))
 
-        decoder_inh =  nengo.Ensemble(n_inh_decoder, dimensions=1,
+        decoder_inh =  nengo.Ensemble(n_inh_decoder, dimensions=dimensions,
                                       neuron_type = nengo.LIF(tau_rc=0.005),
                                       radius = 1,
                                       intercepts=nengo.dists.Choice([0.1]),                                                 
@@ -273,7 +283,7 @@ def run(model_dict, t_end, dt=0.001, save_results=False):
     p_srf_rec_weights = model_dict['weight_probes']['srf_rec_weights']
     p_decoder_weights = model_dict['weight_probes']['decoder_weights']
 
-    srf_rec_weights = sim.data[p_srf_rec_weights]
+    srf_rec_weights = sim.data.get(p_srf_rec_weights, None)
     srf_exc_weights = sim.data[p_srf_exc_weights]
     srf_output_spikes = sim.data[p_srf_output_spikes]
     decoder_spikes = sim.data[p_decoder_spikes]
