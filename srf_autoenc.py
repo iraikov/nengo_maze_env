@@ -70,7 +70,6 @@ def build_network(params, inputs, dimensions, input_encoders=None, direct_input=
         n_inputs = np.product(inputs.shape[1:])
     else:
         n_inputs = len(inputs)
-    print(f'n_inputs = {n_inputs}')
     if srf_output_coords is not None:
         n_outputs = srf_output_coords.shape[0]
     if srf_exc_coords is not None:

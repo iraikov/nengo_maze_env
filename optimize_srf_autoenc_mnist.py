@@ -31,6 +31,31 @@ def mse(rates, target_rates):
     return mses
     
 
+def modulation_depth(rates):
+    mod_depths = []
+    for i in range(rates.shape[1]):
+        rates_i = rates[:, i]
+        peak_pctile = np.percentile(rates_i, 80)
+        med_pctile = np.percentile(rates_i, 50)
+        peak_idxs = np.argwhere(rates_i >= peak_pctile)
+        med_idxs = np.argwhere(rates_i <= med_pctile)
+        mean_peak = np.mean(rates_i[peak_idxs])
+        mean_med = np.mean(rates_i[med_idxs])
+        mod_depth = (mean_peak - mean_med) ** 2.
+        mod_depths.append(mod_depth)
+        #logger.info(f"modulation_depth {i}: peak_pctile: {peak_pctile} med_pctile: {med_pctile} mod_depth: {mod_depth}")
+    return mod_depths
+
+
+def fraction_active(rates):
+    n = rates.shape[1]
+    bin_fraction_active = []
+    for i in range(rates.shape[0]):
+        rates_i = rates[i, :]
+        a = len(np.argwhere(rates_i >= 0.1))
+        bin_fraction_active.append(float(a) / float(n))
+        #logger.info(f"fraction_active {i}: a: {a} n: {n} fraction: {float(a) / float(n)}")
+    return bin_fraction_active
     
 def obj_modulation_depth(rates):
     mod_depths = []
@@ -125,6 +150,18 @@ def eval_srf_autoenc(params, input_dimensions, input_data, input_encoders,
 
     output_r2, output_reg = fit_labels(srf_autoenc_output_rates_train[n_frame_steps:,:],
                                        train_labels[1:], n_frame_steps, return_model=True)
+
+    ## TODO: convert to features
+    logger.info(f'output modulation depth (train): {np.mean(modulation_depth(srf_autoenc_output_rates_train))}\n'
+                f'output modulation depth (test): {np.mean(modulation_depth(srf_autoenc_output_rates_test))}\n'
+                f'decoder modulation depth (train): {np.mean(modulation_depth(srf_autoenc_decoder_rates_train))}\n'
+                f'decoder modulation depth (test): {np.mean(modulation_depth(srf_autoenc_decoder_rates_train))}\n'
+                f'input fraction active: {np.mean(fraction_active(srf_autoenc_exc_rates_train))}\n'
+                f"output fraction active (train): {np.mean(fraction_active(srf_autoenc_output_rates_train))}\n"
+                f"output fraction active (test): {np.mean(fraction_active(srf_autoenc_output_rates_test))}\n"
+                f"decoder fraction active (train): {np.mean(fraction_active(srf_autoenc_decoder_rates_train))}\n"
+                f"decoder mse (train): {np.mean(mse(srf_autoenc_decoder_rates_train, srf_autoenc_exc_rates_train))}\n"
+                f"regression r2: {output_r2}")
 
     _, train_score = predict_labels(output_reg, srf_autoenc_output_rates_train[n_frame_steps:,:],
                                     train_labels[1:], n_frame_steps)
