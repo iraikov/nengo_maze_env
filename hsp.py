@@ -1,6 +1,7 @@
 from nengo.exceptions import SimulationError, ValidationError, BuildError
 from nengo.builder import Builder, Operator, Signal
 from nengo.learning_rules import *
+from nengo.learning_rules import  _remove_default_post_synapse
 from nengo.builder.learning_rules import *
 from nengo.params import (NumberParam, BoolParam)
 from nengo.builder.operator import DotInc, ElementwiseInc, Copy, Reset
@@ -26,19 +27,17 @@ class HSP(LearningRuleType):
     modifies = 'weights'
     probeable = ('pre_filtered', 'post_filtered', 'delta')
     
-    learning_rate = NumberParam("learning_rate", low=0, readonly=True, default=1e-6)
     pre_synapse = SynapseParam("pre_synapse", default=Lowpass(tau=0.005), readonly=True)
     post_synapse = SynapseParam("post_synapse", default=None, readonly=True)
     jit = BoolParam("jit", default=True, readonly=True)
     directed = BoolParam("directed", default=False, readonly=True)
 
     def __init__(self,
-                 learning_rate=Default,
                  pre_synapse=Default,
                  post_synapse=Default,
                  directed=Default,
                  jit=Default):
-        super().__init__(learning_rate, size_in=0)
+        super().__init__(size_in=1)
         self.pre_synapse = pre_synapse
         self.post_synapse = (
             self.pre_synapse if post_synapse is Default else post_synapse
@@ -91,7 +90,7 @@ class SimHSP(Operator):
         The postsynaptic activity, :math:`a_j`.
     delta : Signal
         The synaptic weight change to be applied, :math:`\Delta \weight_{ij}`.
-    learning_rate : float
+    learning_rate : Signal
         The scalar learning rate, :math:`\kappa`.
     tag : str, optional (Default: None)
         A label associated with the operator, for debugging purposes.
@@ -103,7 +102,7 @@ class SimHSP(Operator):
         The postsynaptic activity, :math:`a_j`.
     delta : Signal
         The synaptic weight change to be applied, :math:`\Delta \weight_{ij}`.
-    learning_rate : float
+    learning_rate : Signal
         The scalar learning rate, :math:`\kappa`.
     tag : str or None
         A label associated with the operator, for debugging purposes.
@@ -117,10 +116,9 @@ class SimHSP(Operator):
 
     def __init__(self, pre_filtered, post_filtered, weights, delta, learning_rate, directed, jit, tag=None):
         super(SimHSP, self).__init__(tag=tag)
-        self.learning_rate = learning_rate
         self.sets = []
         self.incs = []
-        self.reads = [pre_filtered, post_filtered, weights]
+        self.reads = [pre_filtered, post_filtered, weights, learning_rate]
         self.updates = [delta]
         self.sgn = np.ones(weights.initial_value.shape)
         self.directed = directed
@@ -143,6 +141,10 @@ class SimHSP(Operator):
     @property
     def weights(self):
         return self.reads[2]
+    
+    @property
+    def learning_rate(self):
+        return self.reads[3]
    
     @property
     def _descstr(self):
@@ -157,15 +159,15 @@ class SimHSP(Operator):
         pre_filtered = signals[self.pre_filtered]
         post_filtered = signals[self.post_filtered]
         delta = signals[self.delta]
-        kappa = self.learning_rate * dt
+        learning_rate = signals[self.learning_rate]
         weights = signals[self.weights]
         mask = self.mask
         sgn = self.sgn
         directed = self.directed
         jit = self.jit
-        
-        def step_simhsp():
 
+        def step_simhsp():
+            kappa = learning_rate[0] * dt
             if jit:
                 if directed:
                     dw = apply_step_directed_jit(kappa, post_filtered, pre_filtered, weights)
@@ -217,13 +219,19 @@ def build_hsp(model, hsp, rule):
     post_filtered = build_or_passthrough(model, hsp.post_synapse, post_activities)
     weights = model.sig[conn]["weights"]
 
+    # Create input learning rate signal
+    learning_rate = Signal(shape=rule.size_in, name="HSP:learning_rate")
+    model.add_op(Reset(learning_rate))
+    model.sig[rule]["in"] = learning_rate  # learning_rate connection will attach here
+
+    
     model.add_op(
         SimHSP(
             pre_filtered,
             post_filtered,
             weights,
             model.sig[rule]["delta"],
-            learning_rate=hsp.learning_rate,
+            learning_rate=learning_rate,
             directed=hsp.directed,
             jit=hsp.jit,
         )
