@@ -52,7 +52,7 @@ def callable_input(inputs, oob_value, t, centered=False):
     return result
 
 
-def build_network(params, inputs, dimensions, input_encoders=None, direct_input=True, oob_value=None, coords=None, n_outputs=None, n_exc=None, n_inh=None, n_inh_decoder=None, seed=0, dt=None):
+def build_network(params, inputs, dimensions, input_encoders=None, direct_input=True, oob_value=None, coords=None, n_outputs=None, n_exc=None, n_inh=None, n_inh_decoder=None, seed=0, t_learn=None, dt=None):
     
     local_random = np.random.RandomState(seed)
 
@@ -115,7 +115,11 @@ def build_network(params, inputs, dimensions, input_encoders=None, direct_input=
         
     with autoencoder_network as model:
 
-        
+        learning_rate_E = params['learning_rate_E']
+        learning_rate_EE = params.get('learning_rate_EE', 1e-5)
+        learning_rate_E_func=(lambda t: learning_rate_E if t <= t_learn else 0.0) if t_learn is not None else None
+        learning_rate_EE_func=(lambda t: learning_rate_EE if t <= t_learn else 0.0) if t_learn is not None else None
+
         srf_network = PRF(dimensions = dimensions,
                           exc_input_func = exc_input_func,
                           connect_exc_inh_input = True,
@@ -134,6 +138,7 @@ def build_network(params, inputs, dimensions, input_encoders=None, direct_input=
                           w_initial_EE = params['w_initial_EE'],
                           w_EI_Ext = params['w_EI_Ext'],
                           p_E = params['p_E_srf'],
+                          p_I = params['p_I_srf'],
                           p_EE = params['p_EE'],
                           p_EI_Ext = params['p_EI_Ext'],
                           p_EI = params['p_EI'],
@@ -141,10 +146,15 @@ def build_network(params, inputs, dimensions, input_encoders=None, direct_input=
                           tau_I = params['tau_I'],
                           tau_input = params['tau_input'],
                           learning_rate_I=params['learning_rate_I'],
-                          learning_rate_E=params['learning_rate_E'],
-                          learning_rate_EE=params.get('learning_rate_EE', 1e-5),
-                          sigma_scale_E = 0.005,
-                          isp_target_rate = 2.0,
+                          learning_rate_E=learning_rate_E,
+                          learning_rate_EE=learning_rate_EE,
+                          learning_rate_E_func=learning_rate_E_func,
+                          learning_rate_EE_func=learning_rate_EE_func,
+                          sigma_scale_E = 0.0025,
+                          sigma_scale_EI = 0.005,
+                          sigma_scale_EE = 0.001,
+                          sigma_scale_I = 0.003,
+                          isp_target_rate = 0.1,
                           direct_input = direct_input,
                           dt=dt,
                           label="Spatial receptive field network",
@@ -178,12 +188,14 @@ def build_network(params, inputs, dimensions, input_encoders=None, direct_input=
             sources = np.asarray(local_random.choice(n_outputs, round(p_DEC * n_outputs), replace=False, p=prob), dtype=np.int32)
             model.weights_initial_DEC_E[i, np.logical_not(np.in1d(range(n_outputs), sources))] = 0.
 
+        learning_rate_DEC_E=params['learning_rate_D_Exc']
         model.conn_DEC_E = nengo.Connection(srf_network.output.neurons,
                                             decoder.neurons,
                                             transform=model.weights_initial_DEC_E,
                                             synapse=nengo.Alpha(tau_E),
-                                            learning_rule_type=HSP(learning_rate=params['learning_rate_D_Exc'], directed=True))
-
+                                            learning_rule_type=HSP(directed=True))
+        model.node_learning_rate_DEC_E = nengo.Node(lambda t: learning_rate_DEC_E)
+        model.conn_learning_rate_DEC_E = nengo.Connection(model.node_learning_rate_DEC_E, model.conn_DEC_E.learning_rule)
                 
         w_DEC_I_ff = params['w_DEC_I']
         weights_initial_DEC_I_ff = local_random.uniform(size=n_inh*n_outputs).reshape((n_inh, n_outputs)) * w_DEC_I_ff
@@ -268,10 +280,10 @@ def build_network(params, inputs, dimensions, input_encoders=None, direct_input=
     }
 
 
-def run(model_dict, t_end, dt=0.001, save_results=False):
-        
+def run(model_dict, t_end, dt=0.001, kernel_tau=0.1, progress_bar=True, save_results=False):
+
     with nengo.Simulator(model_dict['network'], optimize=True, dt=dt,
-                         progress_bar=TerminalProgressBar()) as sim:
+                         progress_bar=TerminalProgressBar() if progress_bar else None) as sim:
         sim.run(np.max(t_end))
 
     p_srf_output_spikes = model_dict['neuron_probes']['srf_output_spikes']
@@ -289,11 +301,11 @@ def run(model_dict, t_end, dt=0.001, save_results=False):
     decoder_spikes = sim.data[p_decoder_spikes]
     decoder_inh_spikes = sim.data[p_decoder_inh_spikes]
     decoder_weights = sim.data[p_decoder_weights]
-    srf_exc_rates = rates_kernel(sim.trange(), sim.data[p_srf_exc_spikes], tau=0.2)
-    srf_inh_rates = rates_kernel(sim.trange(), sim.data[p_srf_inh_spikes], tau=0.2)
-    srf_output_rates = rates_kernel(sim.trange(), srf_output_spikes, tau=0.2)
-    decoder_rates = rates_kernel(sim.trange(), decoder_spikes, tau=0.2)
-    decoder_inh_rates = rates_kernel(sim.trange(), decoder_inh_spikes, tau=0.2)
+    srf_exc_rates = rates_kernel(sim.trange(), sim.data[p_srf_exc_spikes], tau=kernel_tau)
+    srf_inh_rates = rates_kernel(sim.trange(), sim.data[p_srf_inh_spikes], tau=kernel_tau)
+    srf_output_rates = rates_kernel(sim.trange(), srf_output_spikes, tau=kernel_tau)
+    decoder_rates = rates_kernel(sim.trange(), decoder_spikes, tau=kernel_tau)
+    decoder_inh_rates = rates_kernel(sim.trange(), decoder_inh_spikes, tau=kernel_tau)
     if save_results:
         np.save("srf_autoenc_exc_weights", np.asarray(srf_exc_weights, dtype=np.float32))
         np.save("srf_autoenc_exc_rates", np.asarray(srf_exc_rates, dtype=np.float32))

@@ -23,17 +23,16 @@ def show(image):
     pyplot.show()
 
     
-def load_mnist(dataset="training", digits=np.arange(10), path=".", size = 60000):
+def load_mnist(dataset="train", digits=np.arange(10), path=".", size = 60000):
 
-    if dataset == "training":
+    if dataset == "train":
         fname_img = os.path.join(path, 'train-images-idx3-ubyte')
         fname_lbl = os.path.join(path, 'train-labels-idx1-ubyte')
-    elif dataset == "testing":
+    elif dataset == "test":
         fname_img = os.path.join(path, 't10k-images-idx3-ubyte')
         fname_lbl = os.path.join(path, 't10k-labels-idx1-ubyte')
-    
     else:
-        raise ValueError("dataset must be 'testing' or 'training'")
+        raise ValueError("dataset must be 'test' or 'train'")
     
     # Load everything in some numpy arrays
     with open(fname_lbl, 'rb') as flbl:
@@ -73,7 +72,7 @@ def load_mnist(dataset="training", digits=np.arange(10), path=".", size = 60000)
 
 
 
-def generate_inputs(train_size=5000, test_size=500, plot=False, seed=None, dataset='training', digits=np.arange(0, 10)):
+def generate_inputs(train_size=5000, test_size=500, plot=False, seed=None, dataset='train', digits=np.arange(0, 10)):
 
     if seed == None:
         np.random.seed(int((time.time() * 1000000000 ) % (2**32 - 1)))
@@ -81,26 +80,26 @@ def generate_inputs(train_size=5000, test_size=500, plot=False, seed=None, datas
         np.random.seed(seed)
 
     num_imgs = None
-    if dataset == 'training':
-        imgs, lbls = load_mnist(path=cwd + '/data/mnist', digits=digits, size=train_size)
+    if dataset == 'train':
+        imgs, lbls = load_mnist(path=cwd + '/data/mnist', digits=digits, size=train_size, dataset='train')
         num_imgs = imgs.shape[0]
-    elif dataset == 'testing':    
-        test_imgs, test_lbls = load_mnist(path=cwd + '/data/mnist', digits=digits, size=test_size, dataset='testing')
+    elif dataset == 'test':    
+        test_imgs, test_lbls = load_mnist(path=cwd + '/data/mnist', digits=digits, size=test_size, dataset='test')
         num_imgs = test_imgs.shape[0]
         
-    if dataset == 'training':
+    if dataset == 'train':
         stim_idx = np.random.randint(0, high=num_imgs, size=train_size)
-    elif dataset == 'testing':
+    elif dataset == 'test':
         stim_idx = np.random.randint(0, high=num_imgs, size=test_size)
 
-    if dataset == 'training':
+    if dataset == 'train':
         inp = imgs[stim_idx]
         lbl = lbls[stim_idx]
-    elif dataset == 'testing':
+    elif dataset == 'test':
         inp = test_imgs[stim_idx]
         lbl = test_lbls[stim_idx]
     else:
-        print("Please select 'training' or 'testing' for dataset")
+        print("Please select 'train' or 'test' for dataset")
 
 
     if plot:
