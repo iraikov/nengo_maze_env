@@ -51,15 +51,24 @@ class HSP(LearningRuleType):
     
 @jax.jit
 def step_undirected_jit(kappa, pre_filtered, post_filtered, weights):
-    factor = 1.0 - (jnp.square(weights) / jnp.dot(weights, weights))
-    return kappa * factor * pre_filtered * post_filtered
+    d = kappa * factor * pre_filtered * post_filtered
+    delta_sum = jnp.add(d, weights)
+    return jnp.where(delta_sum < 0, 0., d)
 
 @jax.jit
 def step_directed_jit(kappa, pre_filtered, post_filtered, weights):
-    factor = 1.0 - (jnp.square(weights) / jnp.dot(weights, weights))
-    sgn = jnp.where(pre_filtered < post_filtered, -1, 1)
-    return sgn * kappa * factor * pre_filtered * post_filtered
-    
+    error = pre_filtered - post_filtered
+    w = jnp.minimum(weights, 1.0)
+    nweights = weights/jnp.max(weights)
+    r = jnp.where(error<0.,
+                  jnp.where(w>0.0, error/nweights, 0.0),
+                  jnp.where(w>0.0, error*(1.0 - nweights), 0.0))
+    h = jnp.where(w>0.0, weights*post_filtered, 0.0)
+    n = jnp.where(w>0.0, weights*pre_filtered, 0.0)
+    d = kappa * (r - h + n)
+    delta_sum = jnp.add(d, weights)
+    return jnp.where(delta_sum < 0, 0., d)
+     
 @jax.jit
 def apply_step_undirected_jit(kappa, post_filtered, pre_filtered, weights):
     step_vv = jax.vmap(partial(step_undirected_jit, kappa, pre_filtered))
@@ -123,8 +132,7 @@ class SimHSP(Operator):
         self.sgn = np.ones(weights.initial_value.shape)
         self.directed = directed
         self.jit = jit
-        self.mask = np.logical_not(np.isclose(weights.initial_value, 0.))
-            
+        self.mask = np.logical_not(np.isclose(weights.initial_value, 0.)).astype(np.int)
         
     @property
     def delta(self):
@@ -173,7 +181,7 @@ class SimHSP(Operator):
                     dw = apply_step_directed_jit(kappa, post_filtered, pre_filtered, weights)
                 else:
                     dw = apply_step_undirected_jit(kappa, post_filtered, pre_filtered, weights)
-                delta[...] = np.clip(dw * mask, 0., None)
+                delta[...] = jnp.multiply(mask, dw)
             else:
                 sgn[:,:] = 1
                 for i in range(weights.shape[0]):
@@ -183,7 +191,7 @@ class SimHSP(Operator):
                         if len(lt) > 0:
                             for j in range(lt.shape[0]):
                                 sgn[i,j] = -1
-                    delta[i,:] = np.clip(sgn[i,:] * kappa * factor * pre_filtered * mask[i,:] * post_filtered[i], 0., None)
+                    delta[i,:] = sgn[i,:] * kappa * factor * pre_filtered * mask[i,:] * post_filtered[i]
 
             
         return step_simhsp

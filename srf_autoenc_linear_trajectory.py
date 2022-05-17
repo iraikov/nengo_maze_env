@@ -199,6 +199,7 @@ params = {'w_initial_E': 0.01,
           'w_DEC_E': 0.005, 
           'w_DEC_I': 0.002, 
           'p_E_srf': 0.05, 
+          'p_I_srf': 0.3, 
           'p_EE': 0.05, 
           'p_EI': 0.1,
           'p_EI_Ext': 0.007,
@@ -215,9 +216,9 @@ params = {'w_initial_E': 0.01,
           'learning_rate_RCL': 0.0001}
 
 dt = 0.01
-model_dict = build_network(params, inputs=exc_trajectory_inputs, oob_value=0.,
+model_dict = build_network(params, inputs=exc_trajectory_inputs, dimensions=1, oob_value=0.,
                            n_outputs=n_outputs, n_exc=n_exc, n_inh=n_inh, n_inh_decoder=n_inh, 
-                           coords=None, seed=seed, t_learn=t_learn, dt=dt)
+                           coords=None, seed=seed, dt=dt)
 t_end = np.max(trj_t)
 n_timesteps_trj = int(np.max(trj_t)/dt)
 

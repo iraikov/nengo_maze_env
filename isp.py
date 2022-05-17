@@ -1,6 +1,7 @@
 from nengo.exceptions import SimulationError, ValidationError, BuildError
 from nengo.builder import Builder, Operator, Signal
 from nengo.learning_rules import *
+from nengo.learning_rules import  _remove_default_post_synapse
 from nengo.builder.learning_rules import *
 from nengo.params import (NumberParam, BoolParam)
 from nengo.builder.operator import DotInc, ElementwiseInc, Copy, Reset
@@ -28,19 +29,17 @@ class ISP(LearningRuleType):
     modifies = 'weights'
     probeable = ('pre_filtered', 'post_filtered', 'delta')
     
-    learning_rate = NumberParam("learning_rate", low=0, readonly=True, default=1e-6)
     rho0 = NumberParam("rho0", low=0, readonly=True, default=10.)
-    pre_synapse = SynapseParam("pre_synapse", default=Lowpass(tau=0.02), readonly=True)
+    pre_synapse = SynapseParam("pre_synapse", default=Lowpass(tau=0.01), readonly=True)
     post_synapse = SynapseParam("post_synapse", default=None, readonly=True)
     jit = BoolParam("jit", default=True, readonly=True)
 
     def __init__(self,
-                 learning_rate=Default,
                  rho0=Default,
                  pre_synapse=Default,
                  post_synapse=Default,
                  jit=Default):
-        super().__init__(learning_rate, size_in=0)
+        super().__init__(size_in=1)
         self.rho0 = rho0
         self.pre_synapse = pre_synapse
         self.post_synapse = (
@@ -54,7 +53,8 @@ class ISP(LearningRuleType):
 
 @jax.jit
 def step_jit(kappa, rho0, pre_filtered, post_filtered, weights):
-    d = -kappa * pre_filtered * (post_filtered - rho0)
+    kappa1 = jnp.where(post_filtered < rho0, 2*kappa, kappa)
+    d = -kappa1 * pre_filtered * (post_filtered - rho0)
     delta_sum = jnp.add(d, weights)
     return jnp.where(delta_sum >= 0, 0. - weights, d)
 
@@ -87,7 +87,7 @@ class SimISP(Operator):
         The target firing rate, :math:`\rho_{0}`.
     delta : Signal
         The synaptic weight change to be applied, :math:`\Delta \weight_{ij}`.
-    learning_rate : float
+    learning_rate : Signal
         The scalar learning rate, :math:`\kappa`.
     tag : str, optional (Default: None)
         A label associated with the operator, for debugging purposes.
@@ -101,7 +101,7 @@ class SimISP(Operator):
         The target firing rate, :math:`\rho_{0}`.
     delta : Signal
         The synaptic weight change to be applied, :math:`\Delta \weight_{ij}`.
-    learning_rate : float
+    learning_rate : Signal
         The scalar learning rate, :math:`\kappa`.
     tag : str or None
         A label associated with the operator, for debugging purposes.
@@ -115,12 +115,11 @@ class SimISP(Operator):
 
     def __init__(self, pre_filtered, post_filtered, weights, rho0, delta, learning_rate, jit, tag=None):
         super(SimISP, self).__init__(tag=tag)
-        self.learning_rate = learning_rate
         self.rho0 = rho0
         self.mask = np.logical_not(np.isclose(weights.initial_value, 0.))
         self.sets = []
         self.incs = []
-        self.reads = [pre_filtered, post_filtered, weights]
+        self.reads = [pre_filtered, post_filtered, weights, learning_rate]
         self.updates = [delta]
         self.jit = jit
         
@@ -139,6 +138,10 @@ class SimISP(Operator):
     @property
     def weights(self):
         return self.reads[2]
+
+    @property
+    def learning_rate(self):
+        return self.reads[3]
    
     @property
     def _descstr(self):
@@ -154,12 +157,13 @@ class SimISP(Operator):
         post_filtered = signals[self.post_filtered]
         weights = signals[self.weights]
         delta = signals[self.delta]
-        kappa = self.learning_rate * dt
+        learning_rate = signals[self.learning_rate]
         rho0 = self.rho0
         mask = self.mask
         jit = self.jit
         
         def step_simisp():
+            kappa = learning_rate[0] * dt
             ## The code below is an optimized version of the following:
             #for i in range(weights.shape[0]):
             #    delta[i,:] = -kappa * pre_filtered * mask[i,:] * (post_filtered[i] - rho0)
@@ -206,6 +210,10 @@ def build_isp(model, isp, rule):
     pre_filtered = build_or_passthrough(model, isp.pre_synapse, pre_activities)
     post_filtered = build_or_passthrough(model, isp.post_synapse, post_activities)
     weights = model.sig[conn]["weights"]
+    # Create input learning rate signal
+    learning_rate = Signal(shape=rule.size_in, name="ISP:learning_rate")
+    model.add_op(Reset(learning_rate))
+    model.sig[rule]["in"] = learning_rate  # learning_rate connection will attach here
                 
     model.add_op(
         SimISP(
@@ -214,7 +222,7 @@ def build_isp(model, isp, rule):
             weights,
             isp.rho0,
             model.sig[rule]["delta"],
-            learning_rate=isp.learning_rate,
+            learning_rate=learning_rate,
             jit=isp.jit
         )
     )

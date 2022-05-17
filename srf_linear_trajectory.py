@@ -136,6 +136,10 @@ srf_network = PRF(exc_input_func = partial(trajectory_input, exc_trajectory_inpu
                   sigma_scale_E = 0.005,
                   p_EE = 0.03,
                   p_E = 0.1,
+                  isp_target_rate=0.5,
+                  learning_rate_I=0.1, 
+                  learning_rate_E=0.01,
+                  learning_rate_EE=0.001,
                   label="Spatial receptive field network",
                   seed=seed)
 

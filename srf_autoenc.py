@@ -52,7 +52,7 @@ def callable_input(inputs, oob_value, t, centered=False):
     return result
 
 
-def build_network(params, inputs, dimensions, input_encoders=None, direct_input=True, oob_value=None, coords=None, n_outputs=None, n_exc=None, n_inh=None, n_inh_decoder=None, seed=0, t_learn=None, dt=None):
+def build_network(params, inputs, dimensions, input_encoders=None, direct_input=True, oob_value=None, coords=None, n_outputs=None, n_exc=None, n_inh=None, n_inh_decoder=None, seed=0, t_learn_exc=None, t_learn_inh=None, dt=None):
     
     local_random = np.random.RandomState(seed)
 
@@ -114,15 +114,17 @@ def build_network(params, inputs, dimensions, input_encoders=None, direct_input=
         
     with autoencoder_network as model:
 
-        learning_rate_E = params['learning_rate_E']
+        learning_rate_E = params.get('learning_rate_E', 1e-5)
         learning_rate_EE = params.get('learning_rate_EE', 1e-5)
-        learning_rate_E_func=(lambda t: learning_rate_E if t <= t_learn else 0.0) if t_learn is not None else None
-        learning_rate_EE_func=(lambda t: learning_rate_EE if t <= t_learn else 0.0) if t_learn is not None else None
+        learning_rate_I = params.get('learning_rate_I', 1e-4)
+        learning_rate_E_func=(lambda t: learning_rate_E if t <= t_learn_exc else 0.0) if t_learn_exc is not None else None
+        learning_rate_EE_func=(lambda t: learning_rate_EE if t <= t_learn_exc else 0.0) if t_learn_exc is not None else None
+        learning_rate_I_func=(lambda t: learning_rate_I if t <= t_learn_inh else 0.0) if t_learn_inh is not None else None
 
         srf_network = PRF(dimensions = dimensions,
                           exc_input_func = exc_input_func,
                           connect_exc_inh_input = True,
-                          connect_out_out = True,
+                          connect_out_out = True if ('w_initial_EE' in params) and (params['w_initial_EE'] is not None) else False,
                           n_excitatory = n_exc,
                           n_inhibitory = n_inh,
                           n_outputs = n_outputs,
@@ -134,7 +136,7 @@ def build_network(params, inputs, dimensions, input_encoders=None, direct_input=
                           w_initial_E = params['w_initial_E'],
                           w_initial_I = params['w_initial_I'],
                           w_initial_EI = params['w_initial_EI'],
-                          w_initial_EE = params['w_initial_EE'],
+                          w_initial_EE = params.get('w_initial_EE', None),
                           w_EI_Ext = params['w_EI_Ext'],
                           p_E = params['p_E_srf'],
                           p_I = params['p_I_srf'],
@@ -144,16 +146,17 @@ def build_network(params, inputs, dimensions, input_encoders=None, direct_input=
                           tau_E = params['tau_E'],
                           tau_I = params['tau_I'],
                           tau_input = params['tau_input'],
-                          learning_rate_I=params['learning_rate_I'],
+                          learning_rate_I=learning_rate_I,
                           learning_rate_E=learning_rate_E,
                           learning_rate_EE=learning_rate_EE,
                           learning_rate_E_func=learning_rate_E_func,
                           learning_rate_EE_func=learning_rate_EE_func,
-                          sigma_scale_E = 0.0025,
-                          sigma_scale_EI = 0.005,
-                          sigma_scale_EE = 0.001,
-                          sigma_scale_I = 0.003,
-                          isp_target_rate = 0.1,
+                          learning_rate_I_func=learning_rate_I_func,
+                          sigma_scale_E = 0.0005,
+                          sigma_scale_EI = 0.0025,
+                          sigma_scale_EE = 0.0015,
+                          sigma_scale_I = 0.001,
+                          isp_target_rate = params['isp_target_rate'],
                           direct_input = direct_input,
                           dt=dt,
                           label="Spatial receptive field network",
@@ -238,26 +241,26 @@ def build_network(params, inputs, dimensions, input_encoders=None, direct_input=
                                          transform=weights_initial_SRF_I_bp,
                                          synapse=nengo.Alpha(params['tau_I']))
         
-        coincidence_detection = nengo.Node(size_in=2*n_inputs, size_out=n_inputs,
-                                           output=lambda t,x: np.subtract(x[:n_inputs], x[n_inputs:]))
+        coincidence_detection = nengo.Node(size_in=2*n_exc, size_out=n_exc,
+                                           output=lambda t,x: np.subtract(x[:n_exc], x[n_exc:]))
         nengo.Connection(coincidence_detection, conn_DEC_I_fb.learning_rule)
-        nengo.Connection(srf_network.exc.neurons, coincidence_detection[n_inputs:])
-        nengo.Connection(decoder.neurons, coincidence_detection[:n_inputs])
+        nengo.Connection(srf_network.exc.neurons, coincidence_detection[n_exc:])
+        nengo.Connection(decoder.neurons, coincidence_detection[:n_exc])
 
         p_srf_rec_weights = None
         with srf_network:
             p_srf_output_spikes = nengo.Probe(srf_network.output.neurons, 'output', synapse=None)
             p_srf_exc_spikes = nengo.Probe(srf_network.exc.neurons, 'output')
             p_srf_inh_spikes = nengo.Probe(srf_network.inh.neurons, 'output')
-            #p_srf_inh_weights = nengo.Probe(srf_network.conn_I, 'weights')
-            p_srf_exc_weights = nengo.Probe(srf_network.conn_E, 'weights', sample_every=1.0)
+            p_srf_inh_weights = nengo.Probe(srf_network.conn_I, 'weights', sample_every=10.0)
+            p_srf_exc_weights = nengo.Probe(srf_network.conn_E, 'weights', sample_every=10.0)
             if srf_network.conn_EE is not None:
-                p_srf_rec_weights = nengo.Probe(srf_network.conn_EE, 'weights', sample_every=1.0)
+                p_srf_rec_weights = nengo.Probe(srf_network.conn_EE, 'weights', sample_every=10.0)
                 
         p_decoder_spikes = nengo.Probe(decoder.neurons, synapse=None)
         p_decoder_inh_spikes = nengo.Probe(decoder_inh.neurons, synapse=None)
 
-        p_decoder_weights = nengo.Probe(model.conn_DEC_E, 'weights', sample_every=1.0)
+        p_decoder_weights = nengo.Probe(model.conn_DEC_E, 'weights', sample_every=10.0)
 
         model.srf_network = srf_network
         model.decoder_ens = decoder
@@ -273,7 +276,7 @@ def build_network(params, inputs, dimensions, input_encoders=None, direct_input=
              'weight_probes': { 'srf_exc_weights': p_srf_exc_weights,
                                 'srf_rec_weights': p_srf_rec_weights,
                                 'decoder_weights': p_decoder_weights,
-#                               'srf_inh_weights': p_srf_inh_weights,
+                                'srf_inh_weights': p_srf_inh_weights,
 #                               'srf_exc_weights': p_srf_exc_weights,
                                 }
     }
@@ -291,11 +294,13 @@ def run(model_dict, t_end, dt=0.001, kernel_tau=0.1, progress_bar=True, save_res
     p_decoder_spikes = model_dict['neuron_probes']['decoder_spikes']
     p_decoder_inh_spikes = model_dict['neuron_probes']['decoder_inh_spikes']
     p_srf_exc_weights = model_dict['weight_probes']['srf_exc_weights']
+    p_srf_inh_weights = model_dict['weight_probes']['srf_inh_weights']
     p_srf_rec_weights = model_dict['weight_probes']['srf_rec_weights']
     p_decoder_weights = model_dict['weight_probes']['decoder_weights']
 
     srf_rec_weights = sim.data.get(p_srf_rec_weights, None)
     srf_exc_weights = sim.data[p_srf_exc_weights]
+    srf_inh_weights = sim.data[p_srf_inh_weights]
     srf_output_spikes = sim.data[p_srf_output_spikes]
     decoder_spikes = sim.data[p_decoder_spikes]
     decoder_inh_spikes = sim.data[p_decoder_inh_spikes]
@@ -324,6 +329,7 @@ def run(model_dict, t_end, dt=0.001, kernel_tau=0.1, progress_bar=True, save_res
                  'srf_autoenc_output_spikes': srf_output_spikes,
                  'srf_autoenc_decoder_spikes': decoder_spikes,
                  'srf_autoenc_exc_weights': srf_exc_weights,
+                 'srf_autoenc_inh_weights': srf_inh_weights,
                  'srf_autoenc_rec_weights': srf_rec_weights,
                  'srf_autoenc_decoder_weights': decoder_weights,
             
