@@ -64,10 +64,10 @@ def fraction_active(rates):
 
 
 seed=23
-presentation_time=0.5
+presentation_time=1.0
 pause_time=0.5
 
-train_size=150
+train_size=1000
 test_size=20
 
 train_image_array, train_labels = generate_inputs(plot=False, train_size=train_size, dataset='train', seed=seed)
@@ -89,7 +89,7 @@ train_image_array = np.concatenate((train_image_array[0].reshape(1,n_x,n_y), tra
 train_labels = np.concatenate((np.asarray([train_labels[0]]), train_labels))
 
 normed_train_image_array = train_image_array / np.max(train_image_array)
-normed_test_image_array = test_image_array / np.max(test_image_array)
+normed_test_image_array = test_image_array / np.max(train_image_array)
 
 reg_input = LogisticRegression(multi_class="multinomial", solver="saga", tol=0.01, penalty='l1')
 reg_input = reg_input.fit(normed_train_image_array.reshape((normed_train_image_array.shape[0], -1)), train_labels)
@@ -162,7 +162,7 @@ model_dict = build_network(params, dimensions=input_dimensions, inputs=input_dat
                            presentation_time=presentation_time, pause_time=pause_time,
                            coords=coords_dict,
                            t_learn_exc=t_train, t_learn_inh=t_train,
-                           sample_weights_every=10.0 if t_end > 10.0 else 1.0)
+                           sample_weights_every=t_end // 5.0)
 network = model_dict['network']
 
 plt.imshow(network.srf_network.weights_initial_E.T, aspect='auto', interpolation='nearest')
@@ -219,6 +219,16 @@ print(f'output_predictions_train = {output_predictions_train} output_train_score
 output_predictions_test = predict_ngram(example_spikes_test, ngram_model_train, n_labels, ngram_n)
 output_test_score = accuracy_score(test_labels, output_predictions_test)
 print(f'output_predictions_test = {output_predictions_test} output_test_score = {output_test_score}')
+
+ngram_n = 2
+ngram_model_rates_train = fit_ngram_model_rates(example_rates_train, train_labels[1:], n_labels, ngram_n, {})
+output_rates_predictions_train = predict_ngram_rates(example_rates_train, ngram_model_rates_train, n_labels, ngram_n)
+output_rates_train_score = accuracy_score(train_labels[1:], output_rates_predictions_train)
+print(f'output_rates_predictions_train = {output_rates_predictions_train} output_rates_train_score = {output_rates_train_score}')
+
+output_rates_predictions_test = predict_ngram_rates(example_rates_test, ngram_model_rates_train, n_labels, ngram_n)
+output_rates_test_score = accuracy_score(test_labels, output_rates_predictions_test)
+print(f'output_rates_predictions_test = {output_rates_predictions_test} output_rates_test_score = {output_rates_test_score}')
 
 
 print(f"output modulation depth (train): {np.mean(modulation_depth(srf_autoenc_output_rates_train))}")
