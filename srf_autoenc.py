@@ -2,6 +2,8 @@
 import sys, gc
 from functools import partial
 import nengo
+from nengo import Process
+from nengo.params import NdarrayParam, NumberParam
 import numpy as np
 from prf_net import PRF
 from cdisp import CDISP
@@ -20,27 +22,51 @@ def distance_probs(dist, sigma):
     prob = weights / weights.sum(axis=0)                                                                                           
     return prob                                                                                                                    
 
-class ArrayInput:
 
-    def __init__(self, input_matrix, oob_value, dt):
-        self.input_matrix = input_matrix
-        self.oob_value = oob_value
-        self.dt = dt
+class PresentInputWithPause(Process):
+    """Present a series of inputs, each for the same fixed length of time.
 
-    def array_input(self, t):
-        i = int(t/self.dt)
-        if i >= self.input_matrix.shape[0]:
-            i = -1
-        if i == -1:
-            if self.oob_value is None:
-                res = self.input_matrix[i].flatten()
-            else:
-                res = np.ones(self.input_matrix[i].shape).flatten()*self.oob_value
-        else:
-            res = self.input_matrix[i].flatten()
-            
-        return res
+    Parameters
+    ----------
+    inputs : array_like
+        Inputs to present, where each row is an input. Rows will be flattened.
+    presentation_time : float
+        Show each input for this amount of time (in seconds).
+    pause_time : float
+        Pause time after each input (in seconds).
+    """
 
+    inputs = NdarrayParam("inputs", shape=("...",))
+    presentation_time = NumberParam("presentation_time", low=0, low_open=True)
+    pause_time = NumberParam("pause_time", low=0, low_open=True)
+
+    def __init__(self, inputs, presentation_time, pause_time, **kwargs):
+        self.inputs = inputs
+        self.presentation_time = presentation_time
+        self.pause_time = pause_time
+        self.localT = 0
+        super().__init__(
+            default_size_in=0, default_size_out=self.inputs[0].size, **kwargs
+        )
+        
+    def make_step(self, shape_in, shape_out, dt, rng, state):
+        assert shape_in == (0,)
+        assert shape_out == (self.inputs[0].size,)
+        n = len(self.inputs)
+        inputs = self.inputs.reshape(n, -1)
+        presentation_time = float(self.presentation_time)
+        pause_time = float(self.pause_time)
+
+        def step_presentinput(t):
+            t = round(t,6)
+            # Pause
+            total_time = presentation_time + pause_time
+            i = int((t - dt) / total_time + 1e-7)
+            ti = t % total_time
+            return np.zeros_like(inputs[0]) if ti > presentation_time else inputs[i % n]
+        
+        return step_presentinput
+    
 
 def callable_input(inputs, oob_value, t, centered=False):
     if centered:
@@ -52,7 +78,7 @@ def callable_input(inputs, oob_value, t, centered=False):
     return result
 
 
-def build_network(params, inputs, dimensions, input_encoders=None, direct_input=True, oob_value=None, coords=None, n_outputs=None, n_exc=None, n_inh=None, n_inh_decoder=None, seed=0, t_learn_exc=None, t_learn_inh=None, dt=None):
+def build_network(params, inputs, dimensions, input_encoders=None, direct_input=True, presentation_time=1., pause_time=0.1, coords=None, n_outputs=None, n_exc=None, n_inh=None, n_inh_decoder=None, seed=0, t_learn_exc=None, t_learn_inh=None, sample_weights_every=10.):
     
     local_random = np.random.RandomState(seed)
 
@@ -102,15 +128,12 @@ def build_network(params, inputs, dimensions, input_encoders=None, direct_input=
 
     autoencoder_network = nengo.Network(label="Learning with spatial receptive fields", seed=seed)
 
-    exc_input_func = None
+    exc_input_process = None
 
     if type(inputs) == np.ndarray:
-        if dt is None:
-            raise RuntimeError("dt is not provided when array input is provided")
-        array_input_obj = ArrayInput(inputs, oob_value, dt)
-        exc_input_func = array_input_obj.array_input
+        exc_input_process = PresentInputWithPause(inputs, presentation_time, pause_time)
     else:
-        exc_input_func = partial(callable_input, inputs, oob_value)
+        exc_input_process = inputs
         
     with autoencoder_network as model:
 
@@ -122,7 +145,7 @@ def build_network(params, inputs, dimensions, input_encoders=None, direct_input=
         learning_rate_I_func=(lambda t: learning_rate_I if t <= t_learn_inh else 0.0) if t_learn_inh is not None else None
 
         srf_network = PRF(dimensions = dimensions,
-                          exc_input_func = exc_input_func,
+                          exc_input_process = exc_input_process,
                           connect_exc_inh_input = True,
                           connect_out_out = True if ('w_initial_EE' in params) and (params['w_initial_EE'] is not None) else False,
                           n_excitatory = n_exc,
@@ -158,7 +181,6 @@ def build_network(params, inputs, dimensions, input_encoders=None, direct_input=
                           sigma_scale_I = 0.001,
                           isp_target_rate = params['isp_target_rate'],
                           direct_input = direct_input,
-                          dt=dt,
                           label="Spatial receptive field network",
                           seed=seed)
 
@@ -252,15 +274,15 @@ def build_network(params, inputs, dimensions, input_encoders=None, direct_input=
             p_srf_output_spikes = nengo.Probe(srf_network.output.neurons, 'output', synapse=None)
             p_srf_exc_spikes = nengo.Probe(srf_network.exc.neurons, 'output')
             p_srf_inh_spikes = nengo.Probe(srf_network.inh.neurons, 'output')
-            p_srf_inh_weights = nengo.Probe(srf_network.conn_I, 'weights', sample_every=10.0)
-            p_srf_exc_weights = nengo.Probe(srf_network.conn_E, 'weights', sample_every=10.0)
+            p_srf_inh_weights = nengo.Probe(srf_network.conn_I, 'weights', sample_every=sample_weights_every)
+            p_srf_exc_weights = nengo.Probe(srf_network.conn_E, 'weights', sample_every=sample_weights_every)
             if srf_network.conn_EE is not None:
-                p_srf_rec_weights = nengo.Probe(srf_network.conn_EE, 'weights', sample_every=10.0)
+                p_srf_rec_weights = nengo.Probe(srf_network.conn_EE, 'weights', sample_every=sample_weights_every)
                 
         p_decoder_spikes = nengo.Probe(decoder.neurons, synapse=None)
         p_decoder_inh_spikes = nengo.Probe(decoder_inh.neurons, synapse=None)
 
-        p_decoder_weights = nengo.Probe(model.conn_DEC_E, 'weights', sample_every=10.0)
+        p_decoder_weights = nengo.Probe(model.conn_DEC_E, 'weights', sample_every=sample_weights_every)
 
         model.srf_network = srf_network
         model.decoder_ens = decoder

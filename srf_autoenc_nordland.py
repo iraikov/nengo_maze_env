@@ -14,7 +14,7 @@ from nengo_extras.matplotlib import tile
 from srf_autoenc import build_network, run
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score 
-from input_mask import InputMask, Gabor
+from input_mask import SequentialMask, Gabor
 from nordland_data import load_image, generate_inputs
 from ngram import predict_ngram, fit_ngram_model
 
@@ -160,11 +160,11 @@ input_encoders = Gabor(sigma_x=Choice([0.5]),
                        freq=Tile(np.sort(np.repeat(np.linspace(0.2,2.0,n_gabor), n_exc//n_gabor))),
                        phase=Tile(np.sort(np.repeat(np.linspace(-np.pi,np.pi,n_gabor), n_exc//n_gabor))),
                        ).generate(n_exc, gabor_size, rng=rng)
-input_encoders = InputMask((n_x, n_y)).populate(input_encoders, rng=rng, random_positions=False, flatten=True)
+input_encoders = SequentialMask((n_x, n_y)).populate(input_encoders, rng=rng, random_positions=False, flatten=True)
 
 #input_encoders = rng.normal(size=(n_exc, n_x * n_y))
 #input_encoders = rng.normal(size=(n_exc, 5, 5))
-#input_encoders = InputMask((n_x, n_y)).populate(input_encoders, rng=rng, random_positions=True, flatten=True)
+#input_encoders = SequentialMask((n_x, n_y)).populate(input_encoders, rng=rng, random_positions=True, flatten=True)
 
 print(f'input_encoders.shape = {input_encoders.shape}')
 tile(input_encoders.reshape((-1, n_x, n_y)), rows=10, cols=n_gabor, grid=True)

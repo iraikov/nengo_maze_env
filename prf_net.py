@@ -58,8 +58,8 @@ def divergent_topo_transform(rng, n_pre, n_post, coords_pre, coords_post, p_init
 
 class PRF(nengo.Network):
     def __init__(self,
-                 exc_input_func = None,
-                 inh_input_func = None,
+                 exc_input_process = None,
+                 inh_input_process = None,
                  dimensions = 1,
                  n_outputs = 50,
                  n_inhibitory = 250,
@@ -111,7 +111,6 @@ class PRF(nengo.Network):
                  sigma_scale_I = 0.1,
                  label = None,
                  seed = 0,
-                 dt = None,
                  direct_input = True,
                  add_to_container = None,
                  weights_I = None,
@@ -184,13 +183,13 @@ class PRF(nengo.Network):
 
             self.exc_input = None
             self.inh_input = None
-            if exc_input_func is not None:
+            if exc_input_process is not None:
                 if direct_input:
-                    self.exc_input = nengo.Node(output=exc_input_func, size_out=n_excitatory)
+                    self.exc_input = nengo.Node(output=exc_input_process, size_out=n_excitatory)
                 else:
-                    self.exc_input = nengo.Node(output=exc_input_func, size_out=self.dimensions)
-            if inh_input_func is not None:
-                self.inh_input = nengo.Node(output=inh_input_func, size_out=n_inhibitory)
+                    self.exc_input = nengo.Node(output=exc_input_process, size_out=self.dimensions)
+            if inh_input_process is not None:
+                self.inh_input = nengo.Node(output=inh_input_process, size_out=n_inhibitory)
                 
             with self.exc_ens_config:
 
@@ -348,8 +347,8 @@ class PRF(nengo.Network):
             {
                 "neuron_type": nengo.LIF(tau_rc=0.06),
                 "radius": 1,
-                #"intercepts": nengo.dists.Choice([0.01]*self.dimensions),
-                "intercepts": nengo.dists.Exponential(0.15, 0.05, 1.0),
+                "intercepts": nengo.dists.Choice([0.01]*self.dimensions),
+                #"intercepts": nengo.dists.Exponential(0.15, 0.05, 1.0),
                 "encoders": nengo.dists.Choice(np.ones((1,self.dimensions))),
                 "max_rates": nengo.dists.Choice([40])
             }
