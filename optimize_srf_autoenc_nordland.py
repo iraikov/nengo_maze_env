@@ -112,9 +112,6 @@ def eval_srf_autoenc(params, input_dimensions, input_data, input_encoders,
     
     srf_autoenc_output_spikes_train = sim_output_dict['srf_autoenc_output_spikes'][:n_steps_train]
     srf_autoenc_output_spikes_test = sim_output_dict['srf_autoenc_output_spikes'][n_steps_train:]
-    logger.info(f'n_steps_test = {n_steps_test}')
-    logger.info(f'n_steps_frame = {n_steps_frame}')
-    logger.info(f'srf_autoenc_output_spikes_test.shape = {srf_autoenc_output_spikes_test.shape}')
     
     srf_autoenc_exc_rates_train = sim_output_dict['srf_autoenc_exc_rates'][:n_steps_train]
     srf_autoenc_exc_rates_test = sim_output_dict['srf_autoenc_exc_rates'][n_steps_train:]
@@ -217,7 +214,7 @@ def init_obj_fun(worker, seed, train_size, test_size, presentation_time, pause_t
     input_encoders = rng.normal(size=(n_exc, 2, 2))
     input_encoders = Mask((n_x, n_y)).populate(input_encoders, rng=rng, flatten=True)
     
-    t_train = (train_size+1)*(presentation_time + pause_time)
+    t_train = train_size*(presentation_time + pause_time)
     t_test = test_size*(presentation_time + pause_time)
     t_end = t_train + t_test
 
