@@ -9,7 +9,7 @@ season_labels = ["summer", "winter", "fall", "spring"]
 xdim = 48
 ydim = 48
 
-num_imgs_train = 24600
+num_imgs_train = 24570
 num_imgs_test = 2300
 
 """

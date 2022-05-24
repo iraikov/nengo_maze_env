@@ -7,7 +7,7 @@ from nengo_extras.neurons import (
 from nengo.dists import Choice, Uniform
 from nengo_extras.dists import Tile
 from nengo_extras.matplotlib import tile
-from mnist_data import generate_inputs
+from nordland_data import generate_inputs
 from srf_autoenc import build_network, run
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score 
@@ -88,7 +88,8 @@ def obj_fraction_active(rates, target=0.1):
 
             
 def eval_srf_autoenc(params, input_dimensions, input_data, input_encoders,
-                     train_labels, test_labels, presentation_time, pause_time, skip_time,
+                     train_labels, test_labels, label_map, label_inverse_map,
+                     presentation_time, pause_time, skip_time,
                      t_train, t_end, coords_dict, seed, ngram_n=2, dt=0.01):
 
     model_dict = build_network(params, dimensions=input_dimensions, inputs=input_data,
@@ -98,6 +99,7 @@ def eval_srf_autoenc(params, input_dimensions, input_data, input_encoders,
                                sample_weights_every=t_end // 5.0)
 
     sim, sim_output_dict = run(model_dict, t_end, dt=dt, progress_bar=True, save_results=False)
+
 
     train_size = len(train_labels)
     test_size = len(test_labels)
@@ -110,6 +112,9 @@ def eval_srf_autoenc(params, input_dimensions, input_data, input_encoders,
     
     srf_autoenc_output_spikes_train = sim_output_dict['srf_autoenc_output_spikes'][:n_steps_train]
     srf_autoenc_output_spikes_test = sim_output_dict['srf_autoenc_output_spikes'][n_steps_train:]
+    logger.info(f'n_steps_test = {n_steps_test}')
+    logger.info(f'n_steps_frame = {n_steps_frame}')
+    logger.info(f'srf_autoenc_output_spikes_test.shape = {srf_autoenc_output_spikes_test.shape}')
     
     srf_autoenc_exc_rates_train = sim_output_dict['srf_autoenc_exc_rates'][:n_steps_train]
     srf_autoenc_exc_rates_test = sim_output_dict['srf_autoenc_exc_rates'][n_steps_train:]
@@ -120,21 +125,19 @@ def eval_srf_autoenc(params, input_dimensions, input_data, input_encoders,
     srf_autoenc_output_rates_train = sim_output_dict['srf_autoenc_output_rates'][:n_steps_train]
     srf_autoenc_output_rates_test = sim_output_dict['srf_autoenc_output_rates'][n_steps_train:]
 
-    logger.info(f'n_steps_test = {n_steps_test}')
-    logger.info(f'n_steps_frame = {n_steps_frame}')
-    logger.info(f'srf_autoenc_output_spikes_test.shape = {srf_autoenc_output_spikes_test.shape}')
-    
     example_spikes_train = [x[n_steps_skip:n_steps_present]
                             for x in np.split(srf_autoenc_output_spikes_train, n_steps_train//n_steps_frame)]
     example_spikes_test = [x[n_steps_skip:n_steps_present]
                            for x in np.split(srf_autoenc_output_spikes_test, n_steps_test/n_steps_frame)]
 
-    
-    ngram_decoder = fit_ngram_decoder(example_spikes_train, train_labels, n_labels, ngram_n, {})
-    output_predictions_train = predict_ngram(example_spikes_train, ngram_decoder, n_labels, ngram_n)
+    logger.info(f'len(train_labels) = {len(train_labels)}')
+    logger.info(f'len(example_spikes_train) = {len(example_spikes_train)}')
+    ngram_n = 2
+    ngram_decoder = fit_ngram_decoder(example_spikes_train, [ label_map[l] for l in train_labels ], n_labels, ngram_n, {})
+    output_predictions_train = [label_inverse_map[i] for i in predict_ngram(example_spikes_train, ngram_decoder, n_labels, ngram_n)]
     output_train_score = accuracy_score(train_labels, output_predictions_train)
 
-    output_predictions_test = predict_ngram(example_spikes_test, ngram_decoder, n_labels, ngram_n)
+    output_predictions_test = [label_inverse_map[i] for i in predict_ngram(example_spikes_test, ngram_decoder, n_labels, ngram_n) ]
     output_test_score = accuracy_score(test_labels, output_predictions_test)
 
     logger.info(f'output modulation depth (train): {np.mean(modulation_depth(srf_autoenc_output_rates_train))}\n'
@@ -171,14 +174,24 @@ def init_obj_fun(worker, seed, train_size, test_size, presentation_time, pause_t
 
     train_labels = None
     test_labels = None
+
+    label_map = None
+    label_inverse_map = None
     
     if worker is None or worker.worker_id == 1:
 
-        train_image_array, train_labels = generate_inputs(plot=False, train_size=train_size, dataset='train', seed=seed)
-        test_image_array, test_labels = generate_inputs(plot=False, test_size=test_size, dataset='test', seed=seed)
+        train_image_array, train_labels = generate_inputs('spring', plot=False, train_size=train_size, dataset='train', seed=seed)
+        test_image_array, test_labels = generate_inputs('spring', plot=False, test_size=test_size, dataset='test', seed=seed)
 
         n_x = train_image_array.shape[1]
         n_y = train_image_array.shape[2]
+
+        test_idxs = np.random.randint(0, high=train_size, size=test_size)
+        test_image_array = train_image_array[test_idxs]
+        test_labels = np.asarray(train_labels)[test_idxs]
+        
+        label_map = { v: i for i,v in enumerate(np.unique(train_labels)) }
+        label_inverse_map = { v: i for i, v in label_map.items() }
 
         normed_train_image_array = train_image_array / np.max(train_image_array)
         normed_test_image_array = test_image_array / np.max(train_image_array)
@@ -188,6 +201,8 @@ def init_obj_fun(worker, seed, train_size, test_size, presentation_time, pause_t
     input_data = worker.group_comm.bcast(input_data, root=0)
     n_x, n_y = worker.group_comm.bcast((n_x, n_y), root=0)
     train_labels, test_labels = worker.group_comm.bcast((train_labels, test_labels), root=0)
+    label_map, label_inverse_map = worker.group_comm.bcast((label_map, label_inverse_map), root=0)
+
     input_dimensions = n_x*n_y
 
     srf_exc_coords = np.asarray(range(n_exc)).reshape((n_exc,1)) / n_exc - 0.5
@@ -202,13 +217,14 @@ def init_obj_fun(worker, seed, train_size, test_size, presentation_time, pause_t
     input_encoders = rng.normal(size=(n_exc, 2, 2))
     input_encoders = Mask((n_x, n_y)).populate(input_encoders, rng=rng, flatten=True)
     
-    t_train = train_size*(presentation_time + pause_time)
+    t_train = (train_size+1)*(presentation_time + pause_time)
     t_test = test_size*(presentation_time + pause_time)
     t_end = t_train + t_test
 
     def obj_fun(pp, pid=None):
         res = eval_srf_autoenc(pp, input_dimensions, input_data, input_encoders,
-                               train_labels, test_labels, presentation_time, pause_time, skip_time,
+                               train_labels, test_labels, label_map, label_inverse_map,
+                               presentation_time, pause_time, skip_time,
                                t_train, t_end, coords_dict, pp['seed'], ngram_n=2, dt=dt)
         logger.info(f"Iter: {pid}\t pp:{pp}, result:{res}")
         return res
@@ -287,10 +303,10 @@ if __name__ == '__main__':
                  'n_inh': n_inh,
                  'dt': dt }
     
-    dmosopt_params = {'opt_id': 'dmosopt_srf_autoenc_mnist',
+    dmosopt_params = {'opt_id': 'dmosopt_srf_autoenc_nordland',
                       'obj_fun_init_name': 'init_obj_fun',
                       'obj_fun_init_args': init_args,
-                      'obj_fun_init_module': 'optimize_srf_autoenc_mnist',
+                      'obj_fun_init_module': 'optimize_srf_autoenc_nordland',
                       'problem_parameters': problem_parameters,
                       'optimize': 'nsga2',
                       'space': space,
@@ -301,7 +317,7 @@ if __name__ == '__main__':
                       'resample_fraction': 1.0,
                       'save': True,
                       'file_path': True,
-                      'file_path': 'dmosopt.srf_autoenc_mnist.h5',
+                      'file_path': 'dmosopt.srf_autoenc_nordland.h5',
                   }
     
     best = dmosopt.run(dmosopt_params, spawn_workers=False, verbose=True)

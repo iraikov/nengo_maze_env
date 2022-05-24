@@ -15,7 +15,7 @@ from srf_autoenc import build_network, run
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score 
 from input_mask import SequentialMask, Mask, Gabor
-from nordland_data import load_image, generate_inputs
+from nordland_data import generate_inputs
 from decoding import predict_ngram, fit_ngram_decoder
 
 
@@ -72,7 +72,7 @@ skip_time=0.03
 train_size=100
 test_size=10
 
-train_image_array, train_labels = generate_inputs('winter', plot=True, train_size=train_size, dataset='train', seed=seed)
+train_image_array, train_labels = generate_inputs('spring', plot=True, train_size=train_size, dataset='train', seed=seed)
 test_idxs = np.random.randint(0, high=train_size, size=test_size)
 test_image_array = train_image_array[test_idxs]
 test_labels = np.asarray(train_labels)[test_idxs]
@@ -119,27 +119,33 @@ coords_dict = { 'srf_output': srf_output_coords,
 
 params = {'w_initial_E': 0.002, 
           'w_initial_EI': 0.003,
-          'w_initial_EE': 0.002, 
+          'w_initial_EE': 0.002,
           'w_initial_I': -0.005, 
           'w_initial_I_DEC_fb': -0.05, 
-          'w_EI_Ext': 0.002,
+          'w_EI_Ext': 0.005,
           'w_DEC_E': 0.005, 
           'w_DEC_I': 0.002, 
           'p_E_srf': 0.2, 
           'p_I_srf': 0.5,
-          'p_EE': 0.1, 
-          'p_EI': 0.3,
-          'p_EI_Ext': 0.2,
+          'p_EE': 0.05, 
+          'p_EI': 0.2,
+          'p_EI_Ext': 0.3,
           'p_DEC': 0.3, 
           'tau_E': 0.005, 
           'tau_I': 0.010, 
           'tau_input': 0.02,
           'isp_target_rate': 1.0,
-          'learning_rate_I': 0.1, 
-          'learning_rate_E': 1e-4,
-          'learning_rate_EE': 1e-4,
-          'learning_rate_D': 0.08,
-          'learning_rate_D_Exc': 0.005}
+          'learning_rate_I': 0.01, 
+          'learning_rate_E': 0.001,
+          'learning_rate_EE': 0.001,
+          'learning_rate_D': 0.1,
+          'learning_rate_D_Exc': 0.005,
+          'sigma_scale_E': 0.001,
+          'sigma_scale_EI': 0.002,
+          'sigma_scale_EI_Ext': 0.002,
+          'sigma_scale_EE': 0.001,
+          'sigma_scale_I': 0.002,
+          }
 
 dt = 0.01
 t_train = (train_size+1)*(presentation_time + pause_time)
@@ -223,8 +229,6 @@ srf_autoenc_inh_rates_test = sim_output_dict['srf_autoenc_inh_rates'][n_steps_tr
 srf_autoenc_rec_weights = sim_output_dict['srf_autoenc_rec_weights']
 srf_autoenc_exc_weights = sim_output_dict['srf_autoenc_exc_weights']
 srf_autoenc_inh_weights = sim_output_dict['srf_autoenc_inh_weights']
-
-
 
 example_spikes_train = [x[n_steps_skip:n_steps_present]
                         for x in np.split(srf_autoenc_output_spikes_train[1*n_steps_frame:,:], (n_steps_train - 1*n_steps_frame)//n_steps_frame)]

@@ -148,7 +148,7 @@ def build_network(params, inputs, dimensions, input_encoders=None, direct_input=
                           exc_input_process = exc_input_process,
                           connect_exc_inh_input = True,
                           connect_out_out = True if ('w_initial_EE' in params) and (params['w_initial_EE'] is not None) else False,
-                          connect_inh_inh = False,
+                          connect_inh_inh = True,
                           n_excitatory = n_exc,
                           n_inhibitory = n_inh,
                           n_outputs = n_outputs,
@@ -176,16 +176,15 @@ def build_network(params, inputs, dimensions, input_encoders=None, direct_input=
                           learning_rate_E_func=learning_rate_E_func,
                           learning_rate_EE_func=learning_rate_EE_func,
                           learning_rate_I_func=learning_rate_I_func,
-                          sigma_scale_E = 0.002,
-                          sigma_scale_EI = 0.002,
-                          sigma_scale_EI_Ext = 0.002,
-                          sigma_scale_EE = 0.005,
-                          sigma_scale_I = 0.001,
+                          sigma_scale_E = params['sigma_scale_E'],
+                          sigma_scale_EI = params['sigma_scale_EI'],
+                          sigma_scale_EI_Ext = params['sigma_scale_EI_Ext'],
+                          sigma_scale_EE = params['sigma_scale_EE'],
+                          sigma_scale_I = params['sigma_scale_I'],
                           isp_target_rate = params['isp_target_rate'],
                           direct_input = direct_input,
                           label="Spatial receptive field network",
                           seed=seed)
-
 
         if input_encoders is not None:
             srf_network.exc.encoders = input_encoders
