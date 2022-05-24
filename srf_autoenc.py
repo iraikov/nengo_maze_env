@@ -148,6 +148,7 @@ def build_network(params, inputs, dimensions, input_encoders=None, direct_input=
                           exc_input_process = exc_input_process,
                           connect_exc_inh_input = True,
                           connect_out_out = True if ('w_initial_EE' in params) and (params['w_initial_EE'] is not None) else False,
+                          connect_inh_inh = False,
                           n_excitatory = n_exc,
                           n_inhibitory = n_inh,
                           n_outputs = n_outputs,
@@ -155,7 +156,7 @@ def build_network(params, inputs, dimensions, input_encoders=None, direct_input=
                           output_coordinates = srf_output_coords,
                           exc_coordinates = srf_exc_coords,
                           inh_coordinates = srf_inh_coords,
-                          
+
                           w_initial_E = params['w_initial_E'],
                           w_initial_I = params['w_initial_I'],
                           w_initial_EI = params['w_initial_EI'],
@@ -175,9 +176,10 @@ def build_network(params, inputs, dimensions, input_encoders=None, direct_input=
                           learning_rate_E_func=learning_rate_E_func,
                           learning_rate_EE_func=learning_rate_EE_func,
                           learning_rate_I_func=learning_rate_I_func,
-                          sigma_scale_E = 0.0005,
-                          sigma_scale_EI = 0.0025,
-                          sigma_scale_EE = 0.0015,
+                          sigma_scale_E = 0.002,
+                          sigma_scale_EI = 0.002,
+                          sigma_scale_EI_Ext = 0.002,
+                          sigma_scale_EE = 0.005,
                           sigma_scale_I = 0.001,
                           isp_target_rate = params['isp_target_rate'],
                           direct_input = direct_input,
@@ -324,6 +326,8 @@ def run(model_dict, t_end, dt=0.001, kernel_tau=0.1, progress_bar=True, save_res
     srf_exc_weights = sim.data[p_srf_exc_weights]
     srf_inh_weights = sim.data[p_srf_inh_weights]
     srf_output_spikes = sim.data[p_srf_output_spikes]
+    srf_exc_spikes = sim.data[p_srf_exc_spikes]
+    srf_inh_spikes = sim.data[p_srf_inh_spikes]
     decoder_spikes = sim.data[p_decoder_spikes]
     decoder_inh_spikes = sim.data[p_decoder_inh_spikes]
     decoder_weights = sim.data[p_decoder_weights]
@@ -348,6 +352,8 @@ def run(model_dict, t_end, dt=0.001, kernel_tau=0.1, progress_bar=True, save_res
                  'srf_autoenc_decoder_inh_rates': decoder_inh_rates,
                  'srf_autoenc_exc_rates': srf_exc_rates,
                  'srf_autoenc_inh_rates': srf_inh_rates,
+                 'srf_autoenc_exc_spikes': srf_exc_spikes,
+                 'srf_autoenc_inh_spikes': srf_inh_spikes,
                  'srf_autoenc_output_spikes': srf_output_spikes,
                  'srf_autoenc_decoder_spikes': decoder_spikes,
                  'srf_autoenc_exc_weights': srf_exc_weights,

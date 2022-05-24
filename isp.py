@@ -53,7 +53,7 @@ class ISP(LearningRuleType):
 
 @jax.jit
 def step_jit(kappa, rho0, pre_filtered, post_filtered, weights):
-    kappa1 = jnp.where(post_filtered < rho0, 2*kappa, kappa)
+    kappa1 = jnp.where(post_filtered < rho0, kappa, kappa)
     d = -kappa1 * pre_filtered * (post_filtered - rho0)
     delta_sum = jnp.add(d, weights)
     return jnp.where(delta_sum >= 0, 0. - weights, d)

@@ -14,9 +14,9 @@ from nengo_extras.matplotlib import tile
 from srf_autoenc import build_network, run
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score 
-from input_mask import SequentialMask, Gabor
+from input_mask import SequentialMask, Mask, Gabor
 from nordland_data import load_image, generate_inputs
-from ngram import predict_ngram, fit_ngram_model
+from decoding import predict_ngram, fit_ngram_decoder
 
 
 plt.rcParams['font.size'] = 18
@@ -64,10 +64,14 @@ def fraction_active(rates):
 
 
 seed=23
-n_frame_steps = 100
+
+presentation_time=0.5
+pause_time=0.2
+skip_time=0.03
 
 train_size=100
 test_size=10
+
 train_image_array, train_labels = generate_inputs('winter', plot=True, train_size=train_size, dataset='train', seed=seed)
 test_idxs = np.random.randint(0, high=train_size, size=test_size)
 test_image_array = train_image_array[test_idxs]
@@ -85,21 +89,19 @@ train_labels = np.concatenate((np.asarray([train_labels[0]]), train_labels))
 n_labels = len(np.unique(train_labels))
 
 normed_train_image_array = train_image_array / np.max(train_image_array)
-normed_test_image_array = test_image_array / np.max(test_image_array)
-train_data = np.repeat(normed_train_image_array, n_frame_steps, axis=0)
-test_data = np.repeat(normed_test_image_array, n_frame_steps, axis=0)
+normed_test_image_array = test_image_array / np.max(train_image_array)
+
 
 reg_input = LogisticRegression(multi_class="multinomial", solver="saga", tol=0.01, penalty='l1')
 reg_input = reg_input.fit(normed_train_image_array.reshape((normed_train_image_array.shape[0], -1)), train_labels)
 print(f'reg model train score: {reg_input.score(normed_train_image_array.reshape((normed_train_image_array.shape[0], -1)), train_labels)}')
 print(f'reg model test score: {reg_input.score(normed_test_image_array.reshape((normed_test_image_array.shape[0], -1)), test_labels)}')
 
-print(f'train_data shape: {train_data.shape}')
 print(f'train labels: {train_labels}')
-print(f'test_data shape: {test_data.shape}')
 print(f'test labels: {test_labels}')
 
-input_data = np.concatenate((train_data, test_data), axis=0)
+
+input_data = np.concatenate((normed_train_image_array, normed_test_image_array), axis=0)
 
 n_outputs=200
 n_exc=1000
@@ -115,15 +117,15 @@ coords_dict = { 'srf_output': srf_output_coords,
                 }
                 
 
-params = {'w_initial_E': 0.001, 
-          'w_initial_EI': 0.001,
-          'w_initial_EE': 0.001, 
+params = {'w_initial_E': 0.002, 
+          'w_initial_EI': 0.003,
+          'w_initial_EE': 0.002, 
           'w_initial_I': -0.005, 
           'w_initial_I_DEC_fb': -0.05, 
-          'w_EI_Ext': 1e-3,
+          'w_EI_Ext': 0.002,
           'w_DEC_E': 0.005, 
           'w_DEC_I': 0.002, 
-          'p_E_srf': 0.1, 
+          'p_E_srf': 0.2, 
           'p_I_srf': 0.5,
           'p_EE': 0.1, 
           'p_EI': 0.3,
@@ -131,27 +133,28 @@ params = {'w_initial_E': 0.001,
           'p_DEC': 0.3, 
           'tau_E': 0.005, 
           'tau_I': 0.010, 
-          'tau_input': 0.05,
-          'isp_target_rate': 2.0,
+          'tau_input': 0.02,
+          'isp_target_rate': 1.0,
           'learning_rate_I': 0.1, 
-          'learning_rate_E': 0.001,
-          'learning_rate_EE': 0.001,
+          'learning_rate_E': 1e-4,
+          'learning_rate_EE': 1e-4,
           'learning_rate_D': 0.08,
           'learning_rate_D_Exc': 0.005}
 
 dt = 0.01
-t_train = float(train_data.shape[0]) * dt
-t_test = float(test_data.shape[0]) * dt
+t_train = (train_size+1)*(presentation_time + pause_time)
+t_test = test_size*(presentation_time + pause_time)
 t_end = t_train + t_test
+
 print(f't_train: {t_train} t_test: {t_test}')
 
 input_dimensions = n_x*n_y
 
-gabor_size = (9,9) # Size of the gabor filter for image inputs
+gabor_size = (11,11) # Size of the gabor filter for image inputs
 rng = np.random.RandomState(seed)
 
 # Generate the encoders for the sensory ensemble
-n_gabor = 9
+n_gabor = 5
 #sigma_x=Tile(np.sort(np.repeat(np.linspace(0.2, 1.0,  n_sigma), n_exc//n_sigma))),
 #sigma_y=Tile(np.sort(np.repeat(np.linspace(0.2, 1.0, n_sigma), n_exc//n_sigma))),
 input_encoders = Gabor(sigma_x=Choice([0.5]),
@@ -160,7 +163,7 @@ input_encoders = Gabor(sigma_x=Choice([0.5]),
                        freq=Tile(np.sort(np.repeat(np.linspace(0.2,2.0,n_gabor), n_exc//n_gabor))),
                        phase=Tile(np.sort(np.repeat(np.linspace(-np.pi,np.pi,n_gabor), n_exc//n_gabor))),
                        ).generate(n_exc, gabor_size, rng=rng)
-input_encoders = SequentialMask((n_x, n_y)).populate(input_encoders, rng=rng, random_positions=False, flatten=True)
+input_encoders = SequentialMask((n_x, n_y)).populate(input_encoders, rng=rng, flatten=True)
 
 #input_encoders = rng.normal(size=(n_exc, n_x * n_y))
 #input_encoders = rng.normal(size=(n_exc, 5, 5))
@@ -172,9 +175,11 @@ plt.show()
 
 model_dict = build_network(params, dimensions=input_dimensions, inputs=input_data,
                            input_encoders=input_encoders, direct_input=False,
-                           oob_value=0., coords=coords_dict,
+                           presentation_time=presentation_time, pause_time=pause_time,
+                           coords=coords_dict,
                            t_learn_exc=t_train, t_learn_inh=t_train,
-                           dt=dt)
+                           sample_weights_every=t_end // 5.0)
+
 network = model_dict['network']
 
 plt.imshow(network.srf_network.weights_initial_E.T, aspect='auto', interpolation='nearest')
@@ -195,33 +200,44 @@ plt.show()
 
 sim, sim_output_dict = run(model_dict, t_end, dt=dt, save_results=False)
 
-srf_autoenc_output_spikes_train = sim_output_dict['srf_autoenc_output_spikes'][:train_data.shape[0]]
-srf_autoenc_output_spikes_test = sim_output_dict['srf_autoenc_output_spikes'][train_data.shape[0]:]
+n_steps_frame = int((presentation_time + pause_time) / dt)
+n_steps_present = int((presentation_time) / dt)
+n_steps_skip = int(skip_time / dt)
+n_steps_train = n_steps_frame * (train_size+1)
+n_steps_test = n_steps_frame * test_size
 
-srf_autoenc_output_rates_train = sim_output_dict['srf_autoenc_output_rates'][:train_data.shape[0]]
-srf_autoenc_exc_rates_train = sim_output_dict['srf_autoenc_exc_rates'][:train_data.shape[0]]
-srf_autoenc_inh_rates_train = sim_output_dict['srf_autoenc_inh_rates'][:train_data.shape[0]]
-srf_autoenc_decoder_rates_train = sim_output_dict['srf_autoenc_decoder_rates'][:train_data.shape[0]]
-srf_autoenc_exc_rates_test = sim_output_dict['srf_autoenc_exc_rates'][train_data.shape[0]:]
-srf_autoenc_output_rates_test = sim_output_dict['srf_autoenc_output_rates'][train_data.shape[0]:]
-srf_autoenc_inh_rates_test = sim_output_dict['srf_autoenc_inh_rates'][:test_data.shape[0]]
+srf_autoenc_output_spikes_train = sim_output_dict['srf_autoenc_output_spikes'][:n_steps_train]
+srf_autoenc_output_spikes_test = sim_output_dict['srf_autoenc_output_spikes'][n_steps_train:]
 
+srf_autoenc_exc_spikes_train = sim_output_dict['srf_autoenc_exc_spikes'][:n_steps_train]
+srf_autoenc_exc_spikes_test = sim_output_dict['srf_autoenc_exc_spikes'][n_steps_train:]
+
+srf_autoenc_output_rates_train = sim_output_dict['srf_autoenc_output_rates'][:n_steps_train]
+srf_autoenc_exc_rates_train = sim_output_dict['srf_autoenc_exc_rates'][:n_steps_train]
+srf_autoenc_inh_rates_train = sim_output_dict['srf_autoenc_inh_rates'][:n_steps_train]
+srf_autoenc_decoder_rates_train = sim_output_dict['srf_autoenc_decoder_rates'][:n_steps_train]
+srf_autoenc_exc_rates_test = sim_output_dict['srf_autoenc_exc_rates'][n_steps_train:]
+srf_autoenc_output_rates_test = sim_output_dict['srf_autoenc_output_rates'][n_steps_train:]
+srf_autoenc_inh_rates_test = sim_output_dict['srf_autoenc_inh_rates'][n_steps_train:]
+
+srf_autoenc_rec_weights = sim_output_dict['srf_autoenc_rec_weights']
 srf_autoenc_exc_weights = sim_output_dict['srf_autoenc_exc_weights']
 srf_autoenc_inh_weights = sim_output_dict['srf_autoenc_inh_weights']
 
-n_steps_train = train_data.shape[0]
-n_steps_test = test_data.shape[0]
-example_spikes_train = np.split(srf_autoenc_output_spikes_train[1*n_frame_steps:,:],
-                                (n_steps_train - 1*n_frame_steps)//n_frame_steps)
-example_spikes_test = np.split(srf_autoenc_output_spikes_test, n_steps_test/n_frame_steps)
 
-ngram_n = 3
-ngram_model_train = fit_ngram_model(example_spikes_train, [ label_map[l] for l in train_labels[1:] ], n_labels, ngram_n, {})
-output_predictions_train = [label_inverse_map[i] for i in predict_ngram(example_spikes_train, ngram_model_train, n_labels, ngram_n)]
+
+example_spikes_train = [x[n_steps_skip:n_steps_present]
+                        for x in np.split(srf_autoenc_output_spikes_train[1*n_steps_frame:,:], (n_steps_train - 1*n_steps_frame)//n_steps_frame)]
+example_spikes_test = [x[n_steps_skip:n_steps_present]
+                       for x in np.split(srf_autoenc_output_spikes_test, n_steps_test/n_steps_frame)]
+
+ngram_n = 2
+ngram_decoder = fit_ngram_decoder(example_spikes_train, [ label_map[l] for l in train_labels[1:] ], n_labels, ngram_n, {})
+output_predictions_train = [label_inverse_map[i] for i in predict_ngram(example_spikes_train, ngram_decoder, n_labels, ngram_n)]
 output_train_score = accuracy_score(train_labels[1:], output_predictions_train)
 print(f'output_predictions_train = {output_predictions_train} output_train_score = {output_train_score}')
 
-output_predictions_test = [label_inverse_map[i] for i in predict_ngram(example_spikes_test, ngram_model_train, n_labels, ngram_n) ]
+output_predictions_test = [label_inverse_map[i] for i in predict_ngram(example_spikes_test, ngram_decoder, n_labels, ngram_n) ]
 output_test_score = accuracy_score(test_labels, output_predictions_test)
 print(f'output_predictions_test = {output_predictions_test} output_test_score = {output_test_score}')
 

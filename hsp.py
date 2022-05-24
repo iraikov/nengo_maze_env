@@ -51,7 +51,15 @@ class HSP(LearningRuleType):
     
 @jax.jit
 def step_undirected_jit(kappa, pre_filtered, post_filtered, weights):
-    d = kappa * factor * pre_filtered * post_filtered
+    error = pre_filtered - post_filtered
+    abs_error = jnp.abs(error)
+    max_abs_error = jnp.max(abs_error)
+    w = jnp.minimum(weights, 1.0)
+    nweights = weights/jnp.max(weights)
+    r = (max_abs_error - abs_error)*(1.0 - nweights)
+    h = jnp.where(w>0.0, weights*post_filtered, 0.0)
+    #n = jnp.where(w>0.0, weights*pre_filtered, 0.0)
+    d = kappa * (r - h)
     delta_sum = jnp.add(d, weights)
     return jnp.where(delta_sum < 0, 0., d)
 
@@ -61,14 +69,15 @@ def step_directed_jit(kappa, pre_filtered, post_filtered, weights):
     w = jnp.minimum(weights, 1.0)
     nweights = weights/jnp.max(weights)
     r = jnp.where(error<0.,
-                  jnp.where(w>0.0, error/nweights, 0.0),
-                  jnp.where(w>0.0, error*(1.0 - nweights), 0.0))
-    h = jnp.where(w>0.0, weights*post_filtered, 0.0)
-    n = jnp.where(w>0.0, weights*pre_filtered, 0.0)
-    d = kappa * (r - h + n)
+                  jnp.where(w>0.0, error/(0.25*nweights), 0.0),
+                  jnp.where(w>0.0, error*(1.01 - nweights), 0.0))
+    h = jnp.where(w>0.0, (1.1 - nweights)*post_filtered, 0.0)
+    #n = jnp.where(w>0.0, weights*pre_filtered, 0.0)
+    d = kappa * (r - h)
     delta_sum = jnp.add(d, weights)
     return jnp.where(delta_sum < 0, 0., d)
-     
+
+
 @jax.jit
 def apply_step_undirected_jit(kappa, post_filtered, pre_filtered, weights):
     step_vv = jax.vmap(partial(step_undirected_jit, kappa, pre_filtered))
