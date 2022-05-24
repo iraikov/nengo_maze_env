@@ -97,7 +97,7 @@ def eval_srf_autoenc(params, input_dimensions, input_data, input_encoders,
                                coords=coords_dict, t_learn_exc=t_train, t_learn_inh=t_train,
                                sample_weights_every=t_end // 5.0)
 
-    sim, sim_output_dict = run(model_dict, t_end, dt=dt, progress_bar=True, save_results=False)
+    sim, sim_output_dict = run(model_dict, t_end, dt=dt, progress_bar=False, save_results=False)
 
     train_size = len(train_labels)
     test_size = len(test_labels)
@@ -216,8 +216,8 @@ if __name__ == '__main__':
     dt = 0.01
     seed = 21
 
-    train_size=80
-    test_size=20
+    train_size=600
+    test_size=60
     
     n_outputs=600
     n_exc=200
@@ -229,14 +229,10 @@ if __name__ == '__main__':
     
     problem_parameters = {'seed': seed,
                           'tau_input': 0.01,
-                          'isp_target_rate': 1.0,
                           'w_DEC_E': 0.005, 
                           'w_DEC_I': 0.002,
                           'w_initial_I_DEC_fb': -0.05, 
                           'p_DEC': 0.1, 
-                          'tau_E': 0.005, 
-                          'tau_I': 0.010, 
-                          'tau_input': 0.005,
                           'learning_rate_D': 0.1,
                           'learning_rate_D_Exc': 0.005
                          }
@@ -246,16 +242,17 @@ if __name__ == '__main__':
              'w_initial_EE': [1e-5, 1e-1],
              'w_initial_I': [-1e-1, -1e-5],
              'w_EI_Ext': [1e-5, 1e-1],
-             'p_E_srf': [0.001, 0.25],
-             'p_I_srf': [0.001, 0.25],
-             'p_EE': [0.01, 0.25],
-             'p_EI': [0.01, 0.25],
-             'p_EI_Ext': [0.001, 0.1],
+             'p_E_srf': [0.1, 0.5],
+             'p_I_srf': [0.1, 0.8],
+             'p_EE': [0.05, 0.5],
+             'p_EI': [0.1, 0.5],
+             'p_EI_Ext': [0.1, 0.5],
              'tau_E': [0.005, 0.05],
              'tau_I': [0.01, 0.05],
-             'learning_rate_I': [1e-4, 1e-1],
-             'learning_rate_E': [1e-4, 1e-1],
-             'learning_rate_EE': [1e-4, 1e-1],
+             'learning_rate_I': [1e-5, 1e-1],
+             'learning_rate_E': [1e-5, 1e-1],
+             'learning_rate_EE': [1e-5, 1e-1],
+             'isp_target_rate': [1.0, 10.0]
             }
 
     objective_names = ['srf_modulation_depth_train',
