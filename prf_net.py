@@ -229,15 +229,22 @@ class PRF(nengo.Network):
                                                     synapse=syn_class(tau_EI_Ext),
                                                     transform=weights_initial_EI_Ext)
                 
-            
-            self.node_learning_rate_I = nengo.Node(lambda t: learning_rate_I) if learning_rate_I_func is None else nengo.Node(learning_rate_I_func)
+            self.node_learning_rate_I = None
+            self.conn_learning_rate_I = None
+            if learning_rate_I_func is not None:
+                self.node_learning_rate_I = nengo.Node(learning_rate_I_func)
+            elif learning_rate_I is not None:
+                self.node_learning_rate_I = nengo.Node(lambda t: learning_rate_I)
+                
             self.conn_I = nengo.Connection(self.inh.neurons,
                                            self.output.neurons,
                                            transform=weights_initial_I,
                                            synapse=syn_class(tau_I),
                                            learning_rule_type=ISP(rho0=isp_target_rate,
-                                                                  pre_synapse=nengo.Lowpass(0.05)))
-            self.conn_learning_rate_I = nengo.Connection(self.node_learning_rate_I, self.conn_I.learning_rule)
+                                                                  pre_synapse=nengo.Lowpass(0.5)) if self.node_learning_rate_I is not None else None)
+
+            if self.node_learning_rate_I is not None:
+                self.conn_learning_rate_I = nengo.Connection(self.node_learning_rate_I, self.conn_I.learning_rule)
 
             self.conn_II = None
             if connect_inh_inh:
@@ -250,19 +257,26 @@ class PRF(nengo.Network):
                                                 transform=weights_dist_II,
                                                 synapse=syn_class(tau_I))
 
-            self.node_learning_rate_E = nengo.Node(lambda t: learning_rate_E) if learning_rate_E_func is None else nengo.Node(learning_rate_E_func)
+            self.node_learning_rate_E = None
+            self.conn_learning_rate_E = None
+            if learning_rate_E_func is not None:
+                self.node_learning_rate_E = nengo.Node(learning_rate_E_func)
+            elif learning_rate_E is not None:
+                self.node_learning_rate_E = nengo.Node(lambda t: learning_rate_E)
+                
             self.conn_E = nengo.Connection(self.exc.neurons,
                                            self.output.neurons, 
                                            transform=weights_initial_E,
                                            synapse=syn_class(tau_E),
-                                           learning_rule_type=GDHL(sigma=gdhl_sigma, eta=gdhl_eta,
-                                                                   learning_rate=learning_rate_E,
-                                                                   pre_synapse=nengo.Lowpass(0.01),
-                                                                   post_synapse=nengo.Lowpass(1.0),
-                                                                   )
-                                               if use_gdhl else HSP(pre_synapse=nengo.Lowpass(0.01),
-                                                                    directed=True))
-            self.conn_learning_rate_E = nengo.Connection(self.node_learning_rate_E, self.conn_E.learning_rule)
+                                           learning_rule_type=(GDHL(sigma=gdhl_sigma, eta=gdhl_eta,
+                                                                    learning_rate=learning_rate_E,
+                                                                    pre_synapse=nengo.Lowpass(0.01),
+                                                                    post_synapse=nengo.Lowpass(1.0))
+                                                               if use_gdhl else HSP(pre_synapse=nengo.Lowpass(0.5),
+                                                                                    directed=True)) if self.node_learning_rate_E is not None else None)
+            if self.node_learning_rate_E is not None:
+               self.conn_learning_rate_E = nengo.Connection(self.node_learning_rate_E, self.conn_E.learning_rule)
+                
                 
             self.conn_EI = nengo.Connection(self.output.neurons,
                                             self.inh.neurons,
@@ -273,15 +287,18 @@ class PRF(nengo.Network):
             self.node_learning_rate_EE = None
             self.conn_learning_rate_EE = None
             if connect_out_out and (self.n_outputs > 1):
+                if learning_rate_EE_func is not None:
+                     self.node_learning_rate_EE = nengo.Node(learning_rate_EE_func)
+                elif learning_rate_EE is not None:
+                    self.node_learning_rate_EE = nengo.Node(lambda t: learning_rate_EE)
                 self.conn_EE = nengo.Connection(self.output.neurons, 
                                                 self.output.neurons, 
                                                 transform=weights_initial_EE,
                                                 synapse=syn_class(tau_EE),
-                                                learning_rule_type=HSP(pre_synapse=nengo.Lowpass(0.03),
-                                                                       directed=True))
-                self.node_learning_rate_EE = nengo.Node(lambda t: learning_rate_EE) \
-                                             if learning_rate_EE_func is None else nengo.Node(learning_rate_EE_func)
-                self.conn_learning_rate_EE = nengo.Connection(self.node_learning_rate_EE, self.conn_EE.learning_rule)
+                                                learning_rule_type=HSP(pre_synapse=nengo.Lowpass(0.5),
+                                                                       directed=True) if self.node_learning_rate_EE else None)
+                if self.node_learning_rate_EE is not None:
+                    self.conn_learning_rate_EE = nengo.Connection(self.node_learning_rate_EE, self.conn_EE.learning_rule)
 
             self.conn_E_Fb = None
             self.conn_learning_rate_E_Fb = None
@@ -317,10 +334,10 @@ class PRF(nengo.Network):
         cfg = nengo.Config(nengo.Ensemble, nengo.Connection)
         cfg[nengo.Ensemble].update(
             {
-                "neuron_type": nengo.LIF(tau_rc=0.03),
+                "neuron_type": nengo.LIF(tau_rc=0.03, tau_ref=0.005),
                 "radius": 1,
                 "intercepts": nengo.dists.Choice([0.1]*self.dimensions),
-                "max_rates": nengo.dists.Choice([40])
+                "max_rates": nengo.dists.Choice([80])
             }
             )
         cfg[nengo.Connection].synapse = None
@@ -332,7 +349,7 @@ class PRF(nengo.Network):
         cfg = nengo.Config(nengo.Ensemble, nengo.Connection)
         cfg[nengo.Ensemble].update(
             {
-                "neuron_type": nengo.LIF(),
+                "neuron_type": nengo.LIF(tau_ref=0.002),
                 "radius": 1,
                 "intercepts": nengo.dists.Choice([0.1]*self.dimensions),
                 "max_rates": nengo.dists.Choice([100])
@@ -347,7 +364,7 @@ class PRF(nengo.Network):
         cfg = nengo.Config(nengo.Ensemble, nengo.Connection)
         cfg[nengo.Ensemble].update(
             {
-                "neuron_type": nengo.LIF(tau_rc=0.03),
+                "neuron_type": nengo.LIF(tau_rc=0.06, tau_ref=0.005),
                 "radius": 1,
                 #"intercepts": nengo.dists.Choice([0.01]*self.dimensions),
                 "intercepts": nengo.dists.Exponential(0.15, 0.025, 1.0),

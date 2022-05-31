@@ -140,9 +140,9 @@ def build_network(params, inputs, dimensions, input_encoders=None, direct_input=
         learning_rate_E = params.get('learning_rate_E', 1e-5)
         learning_rate_EE = params.get('learning_rate_EE', 1e-5)
         learning_rate_I = params.get('learning_rate_I', 1e-4)
-        learning_rate_E_func=(lambda t: learning_rate_E if t <= t_learn_exc else 0.0) if t_learn_exc is not None else None
-        learning_rate_EE_func=(lambda t: learning_rate_EE if t <= t_learn_exc else 0.0) if t_learn_exc is not None else None
-        learning_rate_I_func=(lambda t: learning_rate_I if t <= t_learn_inh else 0.0) if t_learn_inh is not None else None
+        learning_rate_E_func=(lambda t: learning_rate_E if t <= t_learn_exc else 0.0) if t_learn_exc is not None and learning_rate_E is not None else None
+        learning_rate_EE_func=(lambda t: learning_rate_EE if t <= t_learn_exc else 0.0) if t_learn_exc is not None and learning_rate_EE is not None else None
+        learning_rate_I_func=(lambda t: learning_rate_I if t <= t_learn_inh else 0.0) if t_learn_inh is not None and learning_rate_E is not None else None
 
         srf_network = PRF(dimensions = dimensions,
                           exc_input_process = exc_input_process,
