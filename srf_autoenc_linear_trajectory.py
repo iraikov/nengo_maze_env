@@ -77,12 +77,6 @@ def plot_input_rates(input_rates_dict, trajectory=None):
         plt.show()
 
 
-def wrap_oob(ip, ub, oob_value, x):
-    if np.isclose(x, 1e-3, 1e-3):
-        return oob_value
-    else:
-        return ip(x)
-
 arena_margin = 0.50
 arena_dimension = 200
 arena_extent = arena_dimension * (1. + arena_margin)

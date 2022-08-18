@@ -14,7 +14,7 @@ from nengo_extras.matplotlib import tile
 from srf_autoenc import build_network, run
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score 
-from input_mask import SequentialMask, Mask, Gabor
+from inputs import SequentialMask, Mask, Gabor
 from nordland_data import generate_inputs
 from decoding import predict_ngram, fit_ngram_decoder
 
@@ -65,8 +65,8 @@ def fraction_active(rates):
 
 seed=23
 
-presentation_time=0.5
-pause_time=0.2
+presentation_time=1.0
+pause_time=0.3
 skip_time=0.03
 
 train_size=100
@@ -118,7 +118,7 @@ coords_dict = { 'srf_output': srf_output_coords,
                 
 
 params = {'w_initial_E': 0.002, 
-          'w_initial_EI': 0.003,
+          'w_initial_EI': 0.004,
           'w_initial_EE': 0.002,
           'w_initial_I': -0.005, 
           'w_initial_I_DEC_fb': -0.05, 
@@ -128,16 +128,16 @@ params = {'w_initial_E': 0.002,
           'p_E_srf': 0.2, 
           'p_I_srf': 0.5,
           'p_EE': 0.05, 
-          'p_EI': 0.2,
+          'p_EI': 0.3,
           'p_EI_Ext': 0.3,
           'p_DEC': 0.3, 
           'tau_E': 0.005, 
           'tau_I': 0.010, 
           'tau_input': 0.02,
           'isp_target_rate': 1.0,
-          'learning_rate_I': 0.01, 
-          'learning_rate_E': 0.001,
-          'learning_rate_EE': 0.001,
+          'learning_rate_I': 0.001, 
+          'learning_rate_E': 1e-4,
+          'learning_rate_EE': 1e-4,
           'learning_rate_D': 0.1,
           'learning_rate_D_Exc': 0.005,
           'sigma_scale_E': 0.001,

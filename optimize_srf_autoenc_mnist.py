@@ -12,7 +12,7 @@ from srf_autoenc import build_network, run
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score 
 from input_mask import Mask, SequentialMask, Gabor
-from decoding import predict_ngram, fit_ngram_decoder, predict_ngram_rates, fit_ngram_decoder_rates
+from decoding import predict_ngram, fit_ngram_decoder
 from dmosopt import dmosopt
 import logging
 

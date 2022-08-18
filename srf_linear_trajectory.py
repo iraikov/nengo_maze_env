@@ -128,15 +128,15 @@ N_Exc = len(exc_trajectory_inputs)
 N_Inh = len(inh_trajectory_inputs)
 
 seed = 19
-srf_network = PRF(exc_input_func = partial(trajectory_input, exc_trajectory_inputs),
-                  inh_input_func = partial(trajectory_input, inh_trajectory_inputs),
+srf_network = PRF(exc_input_process = partial(trajectory_input, exc_trajectory_inputs),
+                  inh_input_process = partial(trajectory_input, inh_trajectory_inputs),
                   n_excitatory = N_Exc,
                   n_inhibitory = N_Inh,
                   n_outputs = N_Outputs,
                   sigma_scale_E = 0.005,
                   p_EE = 0.03,
-                  p_E = 0.1,
-                  isp_target_rate=0.5,
+                  p_E = 0.2,
+                  isp_target_rate=2.0,
                   learning_rate_I=0.1, 
                   learning_rate_E=0.01,
                   learning_rate_EE=0.001,
@@ -152,19 +152,19 @@ with srf_network:
     p_inh_rates = nengo.Probe(srf_network.inh.neurons)
 
 with nengo.Simulator(srf_network, optimize=True) as sim:
-    sim.run(0.01)
+    sim.run(0.001)
     
-exc_weights = srf_network.conn_E.transform
-inh_weights = srf_network.conn_I.transform
-rec_weights = srf_network.conn_EE.transform
+exc_weights_initial = srf_network.conn_E.transform
+inh_weights_initial = srf_network.conn_I.transform
+rec_weights_initial = srf_network.conn_EE.transform
 
-plt.imshow(np.asarray(exc_weights.sample()).T, aspect="auto", interpolation="nearest")
+plt.imshow(np.asarray(exc_weights_initial.sample()).T, aspect="auto", interpolation="nearest")
 plt.colorbar()
 plt.show()
-plt.imshow(np.asarray(rec_weights.sample()).T, aspect="auto", interpolation="nearest")
+plt.imshow(np.asarray(rec_weights_initial.sample()).T, aspect="auto", interpolation="nearest")
 plt.colorbar()
 plt.show()
-plt.imshow(np.asarray(inh_weights.sample()).T, aspect="auto", interpolation="nearest")
+plt.imshow(np.asarray(inh_weights_initial.sample()).T, aspect="auto", interpolation="nearest")
 plt.colorbar()
 plt.show()
 
@@ -179,21 +179,27 @@ inh_weights = sim.data[p_inh_weights]
 exc_rates = sim.data[p_exc_rates]
 inh_rates = sim.data[p_inh_rates]
 output_spikes = sim.data[p_output_spikes]
-np.save("srf_output_spikes", np.asarray(output_spikes, dtype=np.float32))
-np.save("srf_time_range", np.asarray(sim.trange(), dtype=np.float32))
+#np.save("srf_output_spikes", np.asarray(output_spikes, dtype=np.float32))
+#np.save("srf_time_range", np.asarray(sim.trange(), dtype=np.float32))
 output_rates = rates_kernel(sim.trange(), output_spikes, tau=0.1)
-np.save("srf_output_rates", np.asarray(output_rates, dtype=np.float32))
-np.save("srf_exc_rates", np.asarray(exc_rates, dtype=np.float32))
-np.save("srf_inh_rates", np.asarray(inh_rates, dtype=np.float32))
-np.save("exc_weights", np.asarray(exc_weights, dtype=np.float32))
-np.save("rec_weights", np.asarray(rec_weights, dtype=np.float32))
-np.save("inh_weights", np.asarray(inh_weights, dtype=np.float32))
+#np.save("srf_output_rates", np.asarray(output_rates, dtype=np.float32))
+#np.save("srf_exc_rates", np.asarray(exc_rates, dtype=np.float32))
+#np.save("srf_inh_rates", np.asarray(inh_rates, dtype=np.float32))
+#np.save("exc_weights", np.asarray(exc_weights, dtype=np.float32))
+#np.save("rec_weights", np.asarray(rec_weights, dtype=np.float32))
+#np.save("inh_weights", np.asarray(inh_weights, dtype=np.float32))
+
+plt.imshow(exc_rates.T, aspect="auto", interpolation="nearest")
+plt.colorbar()
+plt.show()
 
 sorted_idxs = np.argsort(-np.argmax(output_rates[3928:].T, axis=1))
 plt.imshow(output_rates[:,sorted_idxs].T, aspect="auto", interpolation="nearest")
 plt.colorbar()
 plt.show()
-#plot_spikes(sim.trange(), sim.data[p_inh_rates][0,:])
+
+plot_spikes(sim.trange(), output_spikes)
+plt.show()
 
 
 
