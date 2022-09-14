@@ -65,6 +65,7 @@ def stdp_detail(model, spikes=4, theta=None, secondary=None):
         nengo.Connection(net.post.neurons, both_spikes[1], synapse=None)
         sp_p = nengo.Probe(both_spikes, synapse=None)
         w_p = nengo.Probe(net.conn, 'weights', synapse=None)
+        v_p = nengo.Probe(net.post.neurons, 'voltage', synapse=None)
         secondary_p = None
         if secondary is not None:
             secondary_p = nengo.Probe(net.conn.learning_rule, secondary, synapse=None)
@@ -75,10 +76,10 @@ def stdp_detail(model, spikes=4, theta=None, secondary=None):
         sim.signals[sim.model.sig[net.conn.learning_rule]['theta']] = theta
     sim.run((1. / net.freq_hz) * spikes + 0.05, progress_bar=False)
 
-    n_plots = 2
+    n_plots = 3
     if secondary is not None:
         n_plots += 1
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(15, 10))
     ax = plt.subplot(n_plots, 1, 1)
     rasterplot(sim.trange(), sim.data[sp_p])
     plt.yticks((1, 2), ("Pre", "Post"))
@@ -90,8 +91,14 @@ def stdp_detail(model, spikes=4, theta=None, secondary=None):
     # plt.yticks((0,))
     plt.xlabel("Time (s)")
     plt.ylabel("$\omega_{ij}$")
+    ax = plt.subplot(n_plots, 1, 3)
+    plt.plot(sim.trange(), sim.data[v_p][..., 0], c='r')
+    plt.xlim(right=sim.trange()[-1])
+    # plt.yticks((0,))
+    plt.xlabel("Time (s)")
+    plt.ylabel("$V$")
     if secondary is not None:
-        ax = plt.subplot(n_plots, 1, 3)
+        ax = plt.subplot(n_plots, 1, 4)
         plt.plot(sim.trange(), sim.data[secondary_p][:, 0])
         plt.xlabel("Time (s)")
         plt.ylabel(secondary)

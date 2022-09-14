@@ -45,7 +45,8 @@ class LearnNet(object):
 
     def build(self):
         with nengo.Network() as net:
-            e_args = dict(encoders=nengo.dists.Choice([[1]]),
+            e_args = dict(neuron_type=nengo.LIF(amplitude=0.1),
+                          encoders=nengo.dists.Choice([[1]]),
                           intercepts=nengo.dists.Choice([0.5]),
                           max_rates=nengo.dists.Choice([100]))
 

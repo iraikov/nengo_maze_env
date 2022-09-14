@@ -110,19 +110,19 @@ params = {'w_initial_E':  0.01,
           'w_II': -0.001,
           'p_E_srf': 0.1, 
           'p_I_srf': 0.2,
-          'p_EE': 0.06, 
-          'p_EI': 0.2,
-          'p_EI_Ext': 0.05,
+          'p_EE': 0.05, 
+          'p_EI': 0.3,
+          'p_EI_Ext': 0.1,
           'p_II_srf': 0.25,
           'tau_E': 0.005, 
           'tau_I': 0.010, 
-          'tau_input': 0.01,
+          'tau_input': 0.015,
           'w_input': 1.0,
-          'isp_target_rate': 1.0,
+          'isp_target_rate_I': 2.0,
           'learning_rate_I': 1e-3, 
           'learning_rate_E': 1e-3,
           'learning_rate_EE': 1e-3,
-          'sigma_scale_E': 0.001,
+          'sigma_scale_E': 0.0005,
           'sigma_scale_EI': 0.002,
           'sigma_scale_EI_Ext': 0.002,
           'sigma_scale_EE': 0.01,
@@ -209,7 +209,7 @@ with nengo.Network(label="MNIST") as model:
                       sigma_scale_EI_Ext = params['sigma_scale_EI_Ext'],
                       sigma_scale_EE = params['sigma_scale_EE'],
                       sigma_scale_I = params['sigma_scale_I'],
-                      isp_target_rate = params['isp_target_rate'],
+                      isp_target_rate_I = params['isp_target_rate_I'],
                       direct_input = False,
                       label="Spatial receptive field network",
                       use_stdp=True,
@@ -219,7 +219,7 @@ with nengo.Network(label="MNIST") as model:
         srf_network.exc_ens.encoders = input_encoders
 
     exc_display_node = nengo.Node(display_func, size_in=input_dim)
-    nengo.Connection(srf_network.exc_ens, exc_display_node, synapse=0.01)
+    nengo.Connection(srf_network.exc_ens, exc_display_node, synapse=0.04)
 
     p_srf_output_spikes = nengo.Probe(srf_network.output.neurons, 'output', synapse=None)
     p_srf_exc_spikes = nengo.Probe(srf_network.exc_ens.neurons, 'output', synapse=None)

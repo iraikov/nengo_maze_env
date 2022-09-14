@@ -48,7 +48,7 @@ class STDP(nengo.learning_rules.LearningRuleType):
         self.post_tau = post_tau
         self.pre_amp = pre_amp
         self.post_amp = post_amp
-        self.bounds = bounds
+        self.bounds = str(bounds).lower()
         self.max_weight = max_weight
         self.min_weight = min_weight
         super(STDP, self).__init__(learning_rate)
@@ -94,6 +94,7 @@ class LogSTDP(nengo.learning_rules.LearningRuleType):
         super(LogSTDP, self).__init__(size_in=1)
 
         
+        
 class RdSTDP(nengo.learning_rules.LearningRuleType):
     """Resource-dependent spike-timing dependent plasticity rule.
 
@@ -125,6 +126,39 @@ class RdSTDP(nengo.learning_rules.LearningRuleType):
         self.r_tau = r_tau
         
         super(RdSTDP, self).__init__(size_in=1)
+
+class HvSTDP(nengo.learning_rules.LearningRuleType):
+    """Homeostatic voltage-dependent spike-timing dependent plasticity rule.
+    """
+
+    # Used by other Nengo objects
+    modifies = "weights"
+    probeable = ("pre_trace", "post_trace", "pre_scale", "post_scale")
+    
+    # Parameters
+    pre_tau = NumberParam("pre_tau", low=0, low_open=False)
+    pre_amp = NumberParam("pre_amp", low=0, low_open=False)
+    post_tau = NumberParam("pre_tau", low=0, low_open=False)
+    post_amp = NumberParam("pre_amp", low=0, low_open=False)
+    bounds = StringParam("bounds")
+    max_weight = NumberParam("max_weight")
+    min_weight = NumberParam("min_weight")
+    theta_pos = NumberParam("theta_pos")
+    
+    def __init__(self, theta_pos=0.5, theta_neg=0.0, pre_tau=0.01, pre_amp=1e-3, post_tau=0.01, post_amp=1e-3,
+                 min_weight=1e-6, max_weight=1, bounds="soft"):
+        
+        self.pre_tau = pre_tau
+        self.pre_amp = pre_amp
+        self.post_tau = post_tau
+        self.post_amp = post_amp
+        self.bounds = str(bounds).lower()
+        self.min_weight = min_weight
+        self.max_weight = max_weight
+        self.theta_pos = theta_pos
+        self.theta_neg = theta_neg
+        
+        super(HvSTDP, self).__init__(size_in=1)
 
 
 # ===============
@@ -643,3 +677,174 @@ class SimRdSTDP(Operator):
             
         return step_rdstdp
  
+
+@Builder.register(HvSTDP)
+def build_hvstdp(model, stdp, rule):
+    conn = rule.connection
+    pre_activities = model.sig[get_pre_ens(conn).neurons]["out"]
+    post_voltages = model.sig[get_post_ens(conn).neurons]["voltage"]
+    pre_trace = Signal(np.zeros(pre_activities.size), name="pre_trace")
+    pre_scale = Signal(np.zeros(model.sig[conn]["weights"].shape), name="pre_scale")
+    post_scale = Signal(np.zeros(model.sig[conn]["weights"].shape), name="post_scale")
+    post_trace = Signal(np.zeros(post_voltages.size), name="post_trace")
+
+    model.add_op(
+        SimHvSTDP(
+            pre_activities,
+            post_voltages,
+            pre_trace,
+            pre_scale,
+            post_trace,
+            post_scale,
+            model.sig[conn]["weights"],
+            model.sig[rule]["delta"],
+            learning_rate=stdp.learning_rate,
+            pre_tau=stdp.pre_tau,
+            pre_amp=stdp.pre_amp,
+            post_tau=stdp.post_tau,
+            post_amp=stdp.post_amp,
+            bounds=stdp.bounds,
+            max_weight=stdp.max_weight,
+            min_weight=stdp.min_weight,
+            theta_pos = stdp.theta_pos,
+            theta_neg = stdp.theta_neg
+        )
+    )
+
+    # expose these for probes
+    model.sig[rule]["pre_trace"] = pre_trace
+    model.sig[rule]["pre_scale"] = pre_scale
+    model.sig[rule]["post_scale"] = post_scale
+    model.sig[rule]["post_trace"] = post_trace
+
+    # Create input learning rate signal
+    learning_rate = Signal(shape=rule.size_in, name="HvSTDP:learning_rate")
+    model.add_op(Reset(learning_rate))
+    model.sig[rule]["in"] = learning_rate  # learning_rate connection will attach here
+
+    model.params[rule] = None  # no build-time info to return
+
+
+class SimHvSTDP(Operator):
+    def __init__(
+        self,
+        pre_activities,
+        post_voltages,
+        pre_trace,
+        pre_scale,
+        post_trace,
+        post_scale,
+        weights,
+        delta,
+        learning_rate,
+        pre_tau,
+        pre_amp,
+        post_tau,
+        post_amp,
+        bounds,
+        max_weight,
+        min_weight,
+        theta_pos,
+        theta_neg,
+    ):
+        self.learning_rate = learning_rate
+        self.pre_tau = pre_tau
+        self.pre_amp = pre_amp
+        self.post_tau = post_tau
+        self.post_amp = post_amp
+        self.bounds = str(bounds).lower()
+        self.max_weight = max_weight
+        self.min_weight = min_weight
+        self.theta_pos = theta_pos
+        self.theta_neg = theta_neg
+        
+        self.sets = []
+        self.incs = []
+        self.reads = [pre_activities, post_voltages, weights]
+        self.updates = [delta, pre_trace, pre_scale, post_trace, post_scale]
+    
+    @property
+    def post_voltages(self):
+        return self.reads[1]
+
+    @property
+    def weights(self):
+        return self.reads[2]
+
+    @property
+    def pre_activities(self):
+        return self.reads[0]
+
+
+    @property
+    def delta(self):
+        return self.updates[0]
+
+    @property
+    def pre_scale(self):
+        return self.updates[2]
+
+    @property
+    def post_scale(self):
+        return self.updates[4]
+
+    @property
+    def pre_trace(self):
+        return self.updates[1]
+    
+    @property
+    def post_trace(self):
+        return self.updates[3]
+
+    def make_step(self, signals, dt, rng):
+        pre_activities = signals[self.pre_activities]
+        post_voltages = signals[self.post_voltages]
+        pre_trace = signals[self.pre_trace]
+        pre_scale = signals[self.pre_scale]
+        post_trace = signals[self.post_trace]
+        post_scale = signals[self.post_scale]
+        weights = signals[self.weights]
+        delta = signals[self.delta]
+        alpha = self.learning_rate * dt
+        theta_neg = self.theta_neg
+        theta_pos = self.theta_pos
+        
+        # Could be configurable
+        pre_ampscale = 1.0
+        post_ampscale = 1.0
+
+        if self.bounds == "soft":
+
+            def update_scales():
+                pre_scale[...] = (self.max_weight - weights) * pre_ampscale
+                post_scale[...] = (weights - self.min_weight) * post_ampscale
+
+        elif self.bounds == "none":
+
+            def update_scales():
+                pre_scale[...] = pre_ampscale
+                post_scale[...] = -post_ampscale
+
+        else:
+            raise RuntimeError(
+                "Unsupported bounds type. Only 'soft' and 'none' are supported."
+            )
+
+        def step_stdp():
+            update_scales()
+            pre_trace[...] += (dt / self.pre_tau) * (
+                -pre_trace + self.pre_amp * pre_activities
+            )
+            post_trace[...] += (dt / self.post_tau) * (
+                -post_trace + self.post_amp * post_voltages
+            )
+
+            u = post_voltages[:, np.newaxis] - self.theta_neg
+            v = post_trace[:, np.newaxis]
+            
+            delta[...] = alpha * (
+                pre_scale * pre_trace[np.newaxis, :] * np.where(u > 0., u, 0.0)
+                - post_scale * pre_activities * v
+            )
+            
+        return step_stdp

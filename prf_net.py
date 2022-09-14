@@ -2,7 +2,7 @@ import sys
 import numpy as np
 import nengo
 from learning.hsp import HSP
-from learning.stdp import RdSTDP
+from learning.stdp import RdSTDP, HvSTDP
 from learning.isp import ISP
 #from gdhl import GDHL
 import nengo_extras
@@ -123,13 +123,15 @@ class PRF(nengo.Network):
                  tau_E = 0.01, # filter for excitatory inputs
                  tau_EI = 0.01, # filter for feedback inhibitory connections
                  tau_EE = 0.01, # filter for recurrent connections
+                 tau_II = 0.01, # filter for recurrent inhibitory connections
                  tau_EI_Ext = 0.01, # filter for excitatory connection to inhibitory inputs (when connect_exc_inh_input = True)
                  tau_E_Fb = 0.01, # filter for output connection to excitatory inputs (when connect_exc_fb  = True)
                  tau_input = 0.005, # filter for node input
                  learning_rate_I = 1e-6, # learning rate for homeostatic inhibitory plasticity
                  learning_rate_E = 1e-5, # learning rate for associative excitatory plasticity
                  learning_rate_EE = 1e-5, # learning rate for recurrent excitatory plasticity
-                 isp_target_rate = 2.0, # target firing rate for inhibitory plasticity
+                 isp_target_rate_I = 2.0, # target firing rate for inhibitory plasticity
+                 isp_target_rate_II = 20.0, # target firing rate for inhibitory plasticity
                  learning_rate_E_func = None, # specify variable learning rate
                  learning_rate_EE_func = None, # specify variable learning rate
                  learning_rate_I_func = None, # specify variable learning rate
@@ -277,11 +279,11 @@ class PRF(nengo.Network):
                                            self.output.neurons,
                                            transform=weights_initial_I,
                                            synapse=syn_class(tau_I),
-                                           learning_rule_type=ISP(rho0=isp_target_rate,
-                                                                  pre_synapse=nengo.Lowpass(0.025)) if self.node_learning_rate_I is not None else None)
+                                           learning_rule_type=ISP(rho0=isp_target_rate_I,
+                                                                  pre_synapse=nengo.Lowpass(0.005)) if self.node_learning_rate_I is not None else None)
 
-            #if self.node_learning_rate_I is not None:
-            #    self.conn_learning_rate_I = nengo.Connection(self.node_learning_rate_I, self.conn_I.learning_rule)
+            if self.node_learning_rate_I is not None:
+                self.conn_learning_rate_I = nengo.Connection(self.node_learning_rate_I, self.conn_I.learning_rule)
 
             self.conn_II = None
             if connect_inh_inh:
@@ -292,9 +294,12 @@ class PRF(nengo.Network):
                 self.conn_II = nengo.Connection(self.inh_ens.neurons,
                                                 self.inh_ens.neurons,
                                                 transform=weights_dist_II,
-                                                synapse=syn_class(tau_I),
-                                                learning_rule_type=ISP(rho0=20.,
-                                                                       pre_synapse=nengo.Lowpass(0.025)) if self.node_learning_rate_I is not None else None)
+                                                synapse=syn_class(tau_II),
+                                                learning_rule_type=ISP(rho0=isp_target_rate_II,
+                                                                       pre_synapse=nengo.Lowpass(0.005)) if self.node_learning_rate_I is not None else None)
+                if self.node_learning_rate_I is not None:
+                    self.conn_learning_rate_II = nengo.Connection(self.node_learning_rate_I, self.conn_II.learning_rule)
+                
             self.node_learning_rate_E = None
             self.conn_learning_rate_E = None
             if learning_rate_E_func is not None:
@@ -331,7 +336,7 @@ class PRF(nengo.Network):
                                                 self.output.neurons, 
                                                 transform=weights_initial_EE,
                                                 synapse=syn_class(tau_EE),
-                                                learning_rule_type=(RdSTDP(r_tau=0.1, pre_tau=0.01, post_tau=0.015, pre_amp=0.3, post_amp=0.6) \
+                                                learning_rule_type=(RdSTDP(r_tau=0.1, pre_tau=0.01, post_tau=0.005, pre_amp=0.3, post_amp=0.9) \
                                                                     if use_stdp else HSP(pre_synapse=nengo.Lowpass(0.02),
                                                                                          post_synapse=nengo.Lowpass(0.04),
                                                                                          directed=True) if self.node_learning_rate_EE else None))
@@ -369,7 +374,7 @@ class PRF(nengo.Network):
         cfg = nengo.Config(nengo.Ensemble, nengo.Connection)
         cfg[nengo.Ensemble].update(
             {
-                "neuron_type": nengo.LIF(tau_rc=0.01, tau_ref=0.002, min_voltage=-40),
+                "neuron_type": nengo.LIF(tau_rc=0.01, tau_ref=0.00233, amplitude=0.1),
                 "radius": 1,
                 #"intercepts": nengo.dists.Choice([0.01]*self.dimensions),
                 "intercepts": nengo.dists.Exponential(0.1, shift=0.01, high=1.0),
@@ -401,7 +406,7 @@ class PRF(nengo.Network):
         cfg = nengo.Config(nengo.Ensemble, nengo.Connection)
         cfg[nengo.Ensemble].update(
             {
-                "neuron_type": nengo.AdaptiveLIF(tau_rc=0.03, tau_ref=0.005, tau_n=1, inc_n=10.0),
+                "neuron_type": nengo.AdaptiveLIF(tau_rc=0.03, tau_ref=0.002, tau_n=1, inc_n=10.0, amplitude=0.1),
                 "radius": 1,
                 "max_rates": nengo.dists.Uniform(40, 100)
             }
