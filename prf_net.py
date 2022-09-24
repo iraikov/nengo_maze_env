@@ -407,6 +407,7 @@ class PRF(nengo.Network):
         cfg[nengo.Ensemble].update(
             {
                 "neuron_type": nengo.AdaptiveLIF(tau_rc=0.03, tau_ref=0.002, tau_n=1, inc_n=10.0, amplitude=0.1),
+                "intercepts": nengo.dists.Exponential(0.1, shift=0.01, high=1.0),
                 "radius": 1,
                 "max_rates": nengo.dists.Uniform(40, 100)
             }

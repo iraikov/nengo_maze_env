@@ -18,7 +18,8 @@ from nengo_extras.dists import Tile
 from nengo_extras.matplotlib import tile
 from sklearn.metrics import accuracy_score
 from sklearn import preprocessing
-from inputs import Mask, SequentialMask, Gabor, OOCS
+from sklearn.decomposition import PCA
+from inputs import Mask, SequentialMask, Gabor
 from inputs import PresentInputWithPause
 from nengo_extras.gui import image_display_function, preprocess_display
 from digits_data import generate_inputs
@@ -27,6 +28,8 @@ from decoding import predict_ngram, fit_ngram_decoder, fit_rate_decoder, predict
 
 plt.rcParams['font.size'] = 18
 
+    
+    
 
 seed=23
 presentation_time=0.1
@@ -60,10 +63,16 @@ normed_train_image_array -= (np.max(normed_train_image_array) - np.min(normed_tr
 normed_test_image_array -= (np.max(normed_test_image_array) - np.min(normed_test_image_array)) / 2.0
 input_data = np.concatenate((normed_train_image_array, normed_test_image_array), axis=0)
 
+
 input_dim = n_x * n_y
 image_shape = (1, n_x, n_y)
 
-n_ensembles = input_dim
+#reduced_image_shape = (1, D, D)
+reduced_dim = 24
+pca = PCA(n_components=reduced_dim)
+input_pca_reduced = pca.fit_transform(input_data.reshape((-1,n_x*n_y)))
+
+n_ensembles = reduced_dim
 n_neurons_per_dim = 30
 
 n_outputs=240
@@ -81,14 +90,11 @@ rng = np.random.RandomState(seed)
 
 # Generate the encoders for the sensory ensemble
 input_encoders = None
-#input_encoders = rng.normal(size=(n_exc, 1))
-#input_encoders = OOCS().generate(n_exc, shape=(2, 2), on_off_frac=0.9)
-#input_encoders = np.sort(rng.normal(size=(n_exc, 2, 2)))
-#input_encoders, feature_positions = SequentialMask((n_x, n_y)).populate(input_encoders, rng=rng,
-#                                                                        flatten=True, return_positions=True)
+
+#input_encoders = rng.normal(size=(n_ensembles, 5, 5))
+#input_encoders = SequentialMask((n_x, n_y)).populate(input_encoders, rng=rng)
 #tile(input_encoders.reshape((-1, n_x, n_y)), rows=10, cols=10, grid=True)
 #plt.show()
-
 
 n_exc_sqrt = math.ceil(np.sqrt(n_exc))
 srf_exc_coords = (np.mgrid[range(n_exc), range(n_exc_sqrt)].reshape((2,-1)).T / n_exc_sqrt)[:n_exc]
@@ -130,15 +136,15 @@ params = {'w_initial_E':  0.01,
           }
 
 
-
+    
     
 sample_input_every=1.0
 sample_weights_every=10.
 
 with nengo.Network(label="MNIST") as model:
 
-    input_process = PresentInputWithPause(input_data, presentation_time, pause_time)
-    input_node = nengo.Node(output=input_process, size_out=input_dim)
+    input_process = PresentInputWithPause(input_pca_reduced, presentation_time, pause_time)
+    input_node = nengo.Node(output=input_process, size_out=reduced_dim)
 
     input_ensemble = nengo.networks.EnsembleArray(
         n_neurons=n_neurons_per_dim,
@@ -149,16 +155,18 @@ with nengo.Network(label="MNIST") as model:
         intercepts= nengo.dists.Exponential(0.1, shift=0.01, high=1.0),
         max_rates=nengo.dists.Uniform(40, 80)
     )
+
     input_ensemble.add_neuron_output()
     nengo.Connection(
         input_node, input_ensemble.input
     )
 
-    display_func = image_display_function(image_shape,preprocess=lambda x: preprocess_display(x*Ln))
-    output_display_node = nengo.Node(display_func, size_in=input_dim)
-    input_display_node = nengo.Node(display_func, size_in=input_dim)
-    nengo.Connection(input_node, input_display_node, synapse=0.01)
-    nengo.Connection(input_ensemble.output, output_display_node, synapse=0.01)
+    #display_func = image_display_function(image_shape,preprocess=lambda x: preprocess_display(x*Ln))
+    #display_func = image_display_function(reduced_image_shape)
+    #output_display_node = nengo.Node(display_func, size_in=reduced_dim)
+    #input_display_node = nengo.Node(display_func, size_in=reduced_dim)
+    #nengo.Connection(input_node, input_display_node, synapse=0.01)
+    #nengo.Connection(input_ensemble.output, output_display_node, synapse=0.01)
 
     learning_rate_E = params.get('learning_rate_E', 1e-5)
     learning_rate_EE = params.get('learning_rate_EE', 1e-5)
@@ -176,7 +184,7 @@ with nengo.Network(label="MNIST") as model:
                       n_inhibitory = n_inh,
                       n_outputs = n_outputs,
 
-                      dimensions = input_dim,
+                      dimensions = reduced_dim,
                       
                       output_coordinates = srf_output_coords,
                       exc_coordinates = srf_exc_coords,
@@ -215,11 +223,8 @@ with nengo.Network(label="MNIST") as model:
                       use_stdp=True,
                       seed=seed)
 
-    if input_encoders is not None:
-        srf_network.exc_ens.encoders = input_encoders
-
-    exc_display_node = nengo.Node(display_func, size_in=input_dim)
-    nengo.Connection(srf_network.exc_ens, exc_display_node, synapse=0.04)
+    #exc_display_node = nengo.Node(display_func, size_in=reduced_dim)
+    #nengo.Connection(srf_network.exc_ens, exc_display_node, synapse=0.04)
 
     p_srf_output_spikes = nengo.Probe(srf_network.output.neurons, 'output', synapse=None)
     p_srf_exc_spikes = nengo.Probe(srf_network.exc_ens.neurons, 'output', synapse=None)

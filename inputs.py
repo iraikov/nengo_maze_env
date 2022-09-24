@@ -22,30 +22,39 @@ class PresentInputWithPause(Process):
     presentation_time = NumberParam("presentation_time", low=0, low_open=True)
     pause_time = NumberParam("pause_time", low=0, low_open=True)
 
-    def __init__(self, inputs, presentation_time, pause_time, **kwargs):
+    def __init__(self, inputs, presentation_time, pause_time, reduce_op=None, **kwargs):
         self.inputs = inputs
         self.presentation_time = presentation_time
         self.pause_time = pause_time
         self.localT = 0
+        self.reduce_op = reduce_op
+        input0 = self.inputs[0]
+        self.size_out = reduce_op(input0).size if reduce_op is not None else input0.size
         super().__init__(
-            default_size_in=0, default_size_out=self.inputs[0].size, **kwargs
+            default_size_in=0, default_size_out=self.size_out, **kwargs
         )
         
     def make_step(self, shape_in, shape_out, dt, rng, state):
         assert shape_in == (0,)
-        assert shape_out == (self.inputs[0].size,)
+        assert shape_out == (self.size_out,)
         n = len(self.inputs)
         inputs = self.inputs.reshape(n, -1)
         presentation_time = float(self.presentation_time)
         pause_time = float(self.pause_time)
-
+        reduce_op = self.reduce_op
+        
         def step_presentinput(t):
             t = round(t,6)
             # Pause
             total_time = presentation_time + pause_time
             i = int((t - dt) / total_time + 1e-7)
             ti = t % total_time
-            return np.zeros_like(inputs[0]) if ti > presentation_time else inputs[i % n]
+            output = np.zeros_like(inputs[0])
+            if ti <= presentation_time:
+                output = inputs[i % n]
+                if reduce_op is not None:
+                    output = reduce_op(output)
+            return output
         
         return step_presentinput
 
